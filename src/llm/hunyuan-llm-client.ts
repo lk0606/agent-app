@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 
-import type { LlmClient, PlanRequest, PlannerDecision } from "./llm-client.js";
+import type { AnswerRequest, LlmClient, PlanRequest, PlannerDecision } from "./llm-client.js";
 
 export class HunyuanLlmClient implements LlmClient {
   private readonly client: OpenAI;
@@ -61,7 +61,7 @@ export class HunyuanLlmClient implements LlmClient {
         needsTool: true,
         toolName: toolCall.function.name,
         toolInput: parsedArgs.input ?? input.userInput,
-        finalAnswer: "The model chose to use a tool to improve accuracy.",
+        draftAnswer: "I will use a tool before answering.",
       };
     }
 
@@ -69,8 +69,36 @@ export class HunyuanLlmClient implements LlmClient {
       needsTool: false,
       toolName: null,
       toolInput: null,
-      finalAnswer: this.readMessageContent(message?.content),
+      draftAnswer: this.readMessageContent(message?.content),
     };
+  }
+
+  async answerWithTool(input: AnswerRequest): Promise<string> {
+    const completion = await this.client.chat.completions.create({
+      model: this.options.model,
+      messages: [
+        {
+          role: "system",
+          content: [
+            "You are a helpful Node agent.",
+            "Use the tool result to answer naturally and directly.",
+            "Do not mention internal planning unless the user asks.",
+          ].join(" "),
+        },
+        {
+          role: "user",
+          content: [
+            `User input: ${input.userInput}`,
+            `Tool used: ${input.toolName}`,
+            `Tool input: ${input.toolInput}`,
+            `Tool output:\n${input.toolOutput}`,
+          ].join("\n\n"),
+        },
+      ],
+    });
+
+    const message = completion.choices[0]?.message;
+    return this.readMessageContent(message?.content);
   }
 
   private parseToolArguments(argumentsText: string): { input?: string } {

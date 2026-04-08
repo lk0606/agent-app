@@ -21,7 +21,7 @@ export class TaskRunner {
     await this.deps.memory.append(request.taskId, {
       role: "user",
       content: request.input,
-      timestamp: new Date().toISOString(),
+      timestamp: new Date().toLocaleString(),
     });
 
     const result = await this.deps.agent.plan(request, {

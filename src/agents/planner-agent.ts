@@ -11,14 +11,15 @@ export class PlannerAgent implements Agent {
     });
 
     const toolCalls: AgentResponse["toolCalls"] = [];
-    let finalAnswer = decision.finalAnswer;
+    let finalAnswer = decision.draftAnswer;
 
     if (decision.needsTool && decision.toolName) {
       const tool = context.tools.find((item) => item.name === decision.toolName);
 
       if (tool) {
+        const toolInput = decision.toolInput ?? request.input;
         const toolOutput = await tool.execute({
-          input: decision.toolInput ?? request.input,
+          input: toolInput,
         });
 
         toolCalls.push({
@@ -26,7 +27,12 @@ export class PlannerAgent implements Agent {
           output: toolOutput,
         });
 
-        finalAnswer = `${decision.finalAnswer}\n\nTool result: ${toolOutput}`;
+        finalAnswer = await context.llm.answerWithTool({
+          userInput: request.input,
+          toolName: tool.name,
+          toolInput,
+          toolOutput,
+        });
       }
     }
 

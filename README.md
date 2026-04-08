@@ -16,7 +16,7 @@
 ## 当前脚手架能力
 
 - `Agent` 抽象与 `PlannerAgent` 示例
-- `Tool` 抽象与 `TimeTool`、`EchoTool` 示例
+- `Tool` 抽象与 `TimeTool`、`HttpFetchTool`、`EchoTool` 示例
 - `MemoryStore` 抽象与内存版实现
 - `TaskRunner` 运行时
 - `HunyuanLlmClient` 实现，通过 OpenAI SDK 接腾讯混元兼容接口
@@ -46,5 +46,5 @@ HUNYUAN_BASE_URL=https://api.hunyuan.cloud.tencent.com/v1
 1. 先看 `docs/learning-plan.md`
 2. 再看 `docs/project-scaffold-plan.md`
 3. 从 `src/index.ts` 开始跑通主流程
-4. 观察 `PlannerAgent -> HunyuanLlmClient -> Tool` 的执行链路
+4. 观察 `PlannerAgent -> HunyuanLlmClient -> Tool -> HunyuanLlmClient` 的执行链路
 5. 逐步增加工具、记忆、任务编排和评测能力

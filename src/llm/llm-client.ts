@@ -7,7 +7,7 @@ export interface PlannerDecision {
   needsTool: boolean;
   toolName: string | null;
   toolInput: string | null;
-  finalAnswer: string;
+  draftAnswer: string;
 }
 
 export interface PlanRequest {
@@ -15,6 +15,14 @@ export interface PlanRequest {
   tools: ToolDefinition[];
 }
 
+export interface AnswerRequest {
+  userInput: string;
+  toolName: string;
+  toolInput: string;
+  toolOutput: string;
+}
+
 export interface LlmClient {
   plan(input: PlanRequest): Promise<PlannerDecision>;
+  answerWithTool(input: AnswerRequest): Promise<string>;
 }
