@@ -1,4 +1,5 @@
 import type { Agent, AgentRequest, AgentResponse } from "../agents/base-agent.js";
+import type { LlmClient } from "../llm/llm-client.js";
 import type { MemoryStore } from "../memory/memory-store.js";
 import type { Logger } from "../shared/logger.js";
 import type { Tool } from "../tools/tool.js";
@@ -7,6 +8,7 @@ export interface TaskRunnerDeps {
   agent: Agent;
   tools: Tool[];
   memory: MemoryStore;
+  llm: LlmClient;
   logger: Logger;
 }
 
@@ -25,6 +27,7 @@ export class TaskRunner {
     const result = await this.deps.agent.plan(request, {
       tools: this.deps.tools,
       memory: this.deps.memory,
+      llm: this.deps.llm,
     });
 
     const timeline = await this.deps.memory.list(request.taskId);

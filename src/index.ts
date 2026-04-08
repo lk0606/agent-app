@@ -1,21 +1,30 @@
+import "dotenv/config";
+
 import { PlannerAgent } from "./agents/planner-agent.js";
 import { loadConfig } from "./config/env.js";
+import { HunyuanLlmClient } from "./llm/hunyuan-llm-client.js";
 import { InMemoryStore } from "./memory/in-memory-store.js";
 import { TaskRunner } from "./runtime/task-runner.js";
 import { createLogger } from "./shared/logger.js";
 import { EchoTool } from "./tools/echo-tool.js";
+import { TimeTool } from "./tools/time-tool.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
   const logger = createLogger(config.appName);
   const memory = new InMemoryStore();
-  const tools = [new EchoTool()];
+  const llm = new HunyuanLlmClient({
+    apiKey: config.hunyuanApiKey,
+    model: config.hunyuanModel,
+    baseURL: config.hunyuanBaseUrl,
+  });
+  const tools = [new TimeTool(), new EchoTool()];
   const agent = new PlannerAgent();
-  const runner = new TaskRunner({ agent, tools, memory, logger });
+  const runner = new TaskRunner({ agent, tools, memory, llm, logger });
 
   const result = await runner.run({
     taskId: "demo-task",
-    input: "请帮我确认这个 Agent 脚手架是否已经具备最小可运行闭环。",
+    input: "现在几点了？请在需要时调用工具。",
   });
 
   logger.info("Final result", result);

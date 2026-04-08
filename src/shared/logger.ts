@@ -6,10 +6,10 @@ export interface Logger {
 export function createLogger(scope: string): Logger {
   return {
     info(message, meta) {
-      console.log(JSON.stringify({ level: "info", scope, message, meta, time: new Date().toISOString() }));
+      console.log(JSON.stringify({ level: "info", scope, message, meta, time: new Date().toISOString() },null, 2));
     },
     error(message, meta) {
-      console.error(JSON.stringify({ level: "error", scope, message, meta, time: new Date().toISOString() }));
+      console.error(JSON.stringify({ level: "error", scope, message, meta, time: new Date().toISOString() },null, 2));
     },
   };
 }
