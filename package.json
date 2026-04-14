@@ -7,8 +7,10 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
+    "dev:server": "tsx src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
+    "start:server": "node dist/server.js",
     "check": "tsc --noEmit -p tsconfig.json"
   },
   "engines": {

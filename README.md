@@ -20,6 +20,7 @@
 - `MemoryStore` 抽象与内存版实现
 - `TaskRunner` 运行时
 - `HunyuanLlmClient` 实现，通过 OpenAI SDK 接腾讯混元兼容接口
+- 最小 HTTP API：`POST /agent/run`
 
 ## 快速开始
 
@@ -39,6 +40,25 @@ pnpm run dev
 HUNYUAN_API_KEY=your_api_key
 HUNYUAN_MODEL=hunyuan-turbos-latest
 HUNYUAN_BASE_URL=https://api.hunyuan.cloud.tencent.com/v1
+AGENT_MAX_STEPS=3
+HTTP_FETCH_TIMEOUT_MS=8000
+HTTP_FETCH_RETRIES=2
+HTTP_FETCH_MAX_CHARS=4000
+PORT=3000
+```
+
+启动 HTTP 服务：
+
+```bash
+pnpm run dev:server
+```
+
+调用示例：
+
+```bash
+curl -X POST http://localhost:3000/agent/run \
+  -H "Content-Type: application/json" \
+  -d '{"input":"请打开 https://cloud.tencent.com/document/product/1729/111007 并总结要点"}'
 ```
 
 ## 推荐演进顺序
@@ -47,4 +67,4 @@ HUNYUAN_BASE_URL=https://api.hunyuan.cloud.tencent.com/v1
 2. 再看 `docs/project-scaffold-plan.md`
 3. 从 `src/index.ts` 开始跑通主流程
 4. 观察 `PlannerAgent -> HunyuanLlmClient -> Tool -> HunyuanLlmClient` 的执行链路
-5. 逐步增加工具、记忆、任务编排和评测能力
+5. 逐步增加工具、记忆、任务编排、API 和评测能力

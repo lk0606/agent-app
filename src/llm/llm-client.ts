@@ -13,6 +13,11 @@ export interface PlannerDecision {
 export interface PlanRequest {
   userInput: string;
   tools: ToolDefinition[];
+  previousToolCalls: Array<{
+    toolName: string;
+    toolInput: string;
+    toolOutput: string;
+  }>;
 }
 
 export interface AnswerRequest {
