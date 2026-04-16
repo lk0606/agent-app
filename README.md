@@ -11,6 +11,8 @@
 
 - `docs/learning-plan.md`：渐进式学习成长计划
 - `docs/project-scaffold-plan.md`：项目脚手架搭建计划
+- `docs/persistence-model.md`：持久化模型设计
+- `docs/postgres-setup.md`：本地 PostgreSQL 启动说明
 - `src/`：Agent 应用骨架代码
 
 ## 当前脚手架能力
@@ -59,6 +61,12 @@ pnpm run dev:server
 curl -X POST http://localhost:3000/agent/run \
   -H "Content-Type: application/json" \
   -d '{"input":"请打开 https://cloud.tencent.com/document/product/1729/111007 并总结要点"}'
+```
+
+启动本地 PostgreSQL：
+
+```bash
+docker compose -f infra/postgres/compose.yaml up -d
 ```
 
 ## 推荐演进顺序
