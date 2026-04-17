@@ -58,6 +58,12 @@ select * from messages limit 5;
 select * from tool_calls limit 5;
 ```
 
+应用侧连通性检查：
+
+```bash
+pnpm run db:check
+```
+
 ## 这一步的目标
 
 这一阶段还没有把应用代码真正连到 PostgreSQL。
@@ -65,6 +71,7 @@ select * from tool_calls limit 5;
 
 - 本地可稳定启动 PostgreSQL
 - 初始化 `tasks / messages / tool_calls`
+- 应用能通过 `DATABASE_URL` 连上 PostgreSQL
 - 为下一步实现 `PostgresMemoryStore` 做准备
 
 ## 下一步

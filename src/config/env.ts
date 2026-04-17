@@ -4,6 +4,7 @@ export interface AppConfig {
   hunyuanApiKey: string;
   hunyuanModel: string;
   hunyuanBaseUrl: string;
+  databaseUrl: string;
   agentMaxSteps: number;
   httpFetchTimeoutMs: number;
   httpFetchRetries: number;
@@ -18,12 +19,19 @@ export function loadConfig(): AppConfig {
     throw new Error("Missing HUNYUAN_API_KEY. Please set it in your environment or .env file.");
   }
 
+  const databaseUrl = process.env.DATABASE_URL;
+
+  if (!databaseUrl) {
+    throw new Error("Missing DATABASE_URL. Please set it in your environment or .env file.");
+  }
+
   return {
     appName: process.env.APP_NAME ?? "agent-app",
     nodeEnv: process.env.NODE_ENV ?? "development",
     hunyuanApiKey,
     hunyuanModel: process.env.HUNYUAN_MODEL ?? "hunyuan-turbos-latest",
     hunyuanBaseUrl: process.env.HUNYUAN_BASE_URL ?? "https://api.hunyuan.cloud.tencent.com/v1",
+    databaseUrl,
     agentMaxSteps: readNumber("AGENT_MAX_STEPS", 3),
     httpFetchTimeoutMs: readNumber("HTTP_FETCH_TIMEOUT_MS", 8000),
     httpFetchRetries: readNumber("HTTP_FETCH_RETRIES", 2),
