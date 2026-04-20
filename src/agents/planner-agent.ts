@@ -64,27 +64,56 @@ export class PlannerAgent implements Agent {
         toolInput,
       });
 
-      const toolOutput = await tool.execute({
-        input: toolInput,
-      });
+      const startedAt = new Date().toISOString();
 
-      context.logger.info("Tool execution finished", {
-        step: step + 1,
-        toolName: tool.name,
-        outputPreview: toolOutput.slice(0, 240),
-      });
+      try {
+        const toolOutput = await tool.execute({
+          input: toolInput,
+        });
 
-      await context.memory.append(request.taskId, {
-        role: "tool",
-        content: `[${tool.name}] ${toolOutput}`,
-        timestamp: new Date().toISOString(),
-      });
+        context.logger.info("Tool execution finished", {
+          step: step + 1,
+          toolName: tool.name,
+          outputPreview: toolOutput.slice(0, 240),
+        });
 
-      toolCalls.push({
-        toolName: tool.name,
-        input: toolInput,
-        output: toolOutput,
-      });
+        await context.memory.append(request.taskId, {
+          role: "tool",
+          content: `[${tool.name}] ${toolOutput}`,
+          timestamp: new Date().toISOString(),
+        });
+
+        await context.memory.recordToolCall({
+          taskId: request.taskId,
+          step: step + 1,
+          toolName: tool.name,
+          toolInput,
+          toolOutput,
+          status: "succeeded",
+          createdAt: startedAt,
+          finishedAt: new Date().toISOString(),
+        });
+
+        toolCalls.push({
+          toolName: tool.name,
+          input: toolInput,
+          output: toolOutput,
+        });
+      } catch (error: unknown) {
+        await context.memory.recordToolCall({
+          taskId: request.taskId,
+          step: step + 1,
+          toolName: tool.name,
+          toolInput,
+          status: "failed",
+          errorCode: error instanceof AppError ? error.code : "TOOL_ERROR",
+          errorMessage: error instanceof Error ? error.message : String(error),
+          createdAt: startedAt,
+          finishedAt: new Date().toISOString(),
+        });
+
+        throw error;
+      }
     }
 
     if (!finalAnswer) {

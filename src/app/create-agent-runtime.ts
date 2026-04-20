@@ -1,7 +1,9 @@
 import { PlannerAgent } from "../agents/planner-agent.js";
 import type { AppConfig } from "../config/env.js";
+import { getDatabaseConfig } from "../db/connection-config.js";
+import { createPgPool } from "../db/pg-client.js";
 import { HunyuanLlmClient } from "../llm/hunyuan-llm-client.js";
-import { InMemoryStore } from "../memory/in-memory-store.js";
+import { PostgresMemoryStore } from "../memory/postgres-memory-store.js";
 import { TaskRunner } from "../runtime/task-runner.js";
 import { createLogger } from "../shared/logger.js";
 import { EchoTool } from "../tools/echo-tool.js";
@@ -10,7 +12,11 @@ import { TimeTool } from "../tools/time-tool.js";
 
 export function createAgentRuntime(config: AppConfig) {
   const logger = createLogger(config.appName);
-  const memory = new InMemoryStore();
+  const database = getDatabaseConfig(config);
+  const pool = createPgPool({
+    connectionString: database.url,
+  });
+  const memory = new PostgresMemoryStore(pool);
   const llm = new HunyuanLlmClient({
     apiKey: config.hunyuanApiKey,
     model: config.hunyuanModel,
@@ -33,5 +39,6 @@ export function createAgentRuntime(config: AppConfig) {
   return {
     logger,
     runner,
+    pool,
   };
 }

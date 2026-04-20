@@ -9,7 +9,7 @@ import { AppError, classifyError } from "./shared/app-error.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  const { runner, logger } = createAgentRuntime(config);
+  const { runner, logger, pool } = createAgentRuntime(config);
 
   const server = createServer(async (req, res) => {
     try {
@@ -64,6 +64,18 @@ async function main(): Promise<void> {
       healthUrl: `http://localhost:${config.port}/health`,
       runUrl: `http://localhost:${config.port}/agent/run`,
     });
+  });
+
+  const shutdown = async () => {
+    server.close();
+    await pool.end();
+  };
+
+  process.on("SIGINT", () => {
+    void shutdown();
+  });
+  process.on("SIGTERM", () => {
+    void shutdown();
   });
 }
 

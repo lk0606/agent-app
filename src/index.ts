@@ -6,7 +6,7 @@ import { classifyError } from "./shared/app-error.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  const { logger, runner } = createAgentRuntime(config);
+  const { logger, runner, pool } = createAgentRuntime(config);
 
   const result = await runner.run({
     taskId: "demo-task",
@@ -14,6 +14,7 @@ async function main(): Promise<void> {
   });
 
   logger.info("Final result", result);
+  await pool.end();
 }
 
 main().catch((error: unknown) => {

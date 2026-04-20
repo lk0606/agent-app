@@ -22,6 +22,12 @@ export class TaskRunner {
     logger.info("Task started", { input: request.input });
 
     try {
+      await this.deps.memory.createTask({
+        id: request.taskId,
+        input: request.input,
+        status: "running",
+      });
+
       await this.deps.memory.append(request.taskId, {
         role: "user",
         content: request.input,
@@ -43,9 +49,23 @@ export class TaskRunner {
         toolCallCount: result.toolCalls.length,
       });
 
+      await this.deps.memory.updateTask(request.taskId, {
+        status: "succeeded",
+        summary: result.summary,
+        finishedAt: new Date().toISOString(),
+      });
+
       return result;
     } catch (error: unknown) {
       const appError = classifyError(error);
+
+      await this.deps.memory.updateTask(request.taskId, {
+        status: "failed",
+        errorCode: appError.code,
+        errorMessage: appError.message,
+        finishedAt: new Date().toISOString(),
+      });
+
       logger.error("Task failed", {
         code: appError.code,
         message: appError.message,

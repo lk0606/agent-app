@@ -10,6 +10,7 @@
     "dev:server": "tsx src/server.ts",
     "build": "tsc -p tsconfig.json",
     "db:check": "tsx src/scripts/check-postgres.ts",
+    "db:inspect": "tsx src/scripts/inspect-postgres.ts",
     "start": "node dist/index.js",
     "start:server": "node dist/server.js",
     "check": "tsc --noEmit -p tsconfig.json"
