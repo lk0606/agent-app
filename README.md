@@ -13,6 +13,7 @@
 - `docs/project-scaffold-plan.md`：项目脚手架搭建计划
 - `docs/persistence-model.md`：持久化模型设计
 - `docs/postgres-setup.md`：本地 PostgreSQL 启动说明
+- `docs/evals-and-replay.md`：评测与回放说明
 - `src/`：Agent 应用骨架代码
 
 ## 当前脚手架能力
@@ -67,6 +68,18 @@ curl -X POST http://localhost:3000/agent/run \
 
 ```bash
 docker compose -f infra/postgres/compose.yaml up -d
+```
+
+运行评测：
+
+```bash
+pnpm run evals:run
+```
+
+回放任务：
+
+```bash
+pnpm run task:replay -- demo-task
 ```
 
 ## 推荐演进顺序

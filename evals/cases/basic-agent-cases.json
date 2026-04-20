@@ -1,0 +1,23 @@
+[
+  {
+    "id": "time-query",
+    "input": "现在几点了？请直接回答，并在需要时调用工具。",
+    "expectedTools": ["time"],
+    "forbiddenTools": ["http_fetch"],
+    "maxToolCalls": 1
+  },
+  {
+    "id": "doc-summary",
+    "input": "请打开 https://cloud.tencent.com/document/product/1729/111007 并简要总结这页主要讲什么。",
+    "expectedTools": ["http_fetch"],
+    "expectedKeywords": ["OpenAI", "兼容", "base_url"],
+    "maxToolCalls": 2
+  },
+  {
+    "id": "direct-answer",
+    "input": "请用一句话解释什么是 TypeScript。",
+    "forbiddenTools": ["time", "http_fetch"],
+    "expectedKeywords": ["JavaScript", "类型"],
+    "maxToolCalls": 0
+  }
+]

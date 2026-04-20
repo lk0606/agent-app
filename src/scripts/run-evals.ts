@@ -1,0 +1,133 @@
+import "dotenv/config";
+
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+import { createAgentRuntime } from "../app/create-agent-runtime.js";
+import { loadConfig } from "../config/env.js";
+
+interface EvalCase {
+  id: string;
+  input: string;
+  expectedTools?: string[];
+  forbiddenTools?: string[];
+  expectedKeywords?: string[];
+  maxToolCalls?: number;
+}
+
+interface EvalCaseResult {
+  id: string;
+  taskId: string;
+  passed: boolean;
+  failures: string[];
+  durationMs: number;
+  summary: string;
+  toolCalls: Array<{
+    toolName: string;
+    input: string;
+    output: string;
+  }>;
+}
+
+async function main(): Promise<void> {
+  const config = loadConfig();
+  const { runner, logger, pool } = createAgentRuntime(config);
+  const casesPath = process.argv[2] ?? path.resolve("evals/cases/basic-agent-cases.json");
+  const reportDir = path.resolve("evals/reports");
+
+  const cases = await loadCases(casesPath);
+  const results: EvalCaseResult[] = [];
+
+  for (const testCase of cases) {
+    const taskId = `eval-${testCase.id}-${Date.now()}`;
+    const startedAt = Date.now();
+    logger.info("Eval case started", { caseId: testCase.id, taskId });
+
+    const result = await runner.run({
+      taskId,
+      input: testCase.input,
+    });
+
+    const durationMs = Date.now() - startedAt;
+    const failures = evaluateCase(testCase, result.summary, result.toolCalls);
+
+    results.push({
+      id: testCase.id,
+      taskId,
+      passed: failures.length === 0,
+      failures,
+      durationMs,
+      summary: result.summary,
+      toolCalls: result.toolCalls,
+    });
+
+    logger.info("Eval case finished", {
+      caseId: testCase.id,
+      taskId,
+      passed: failures.length === 0,
+      durationMs,
+      failures,
+    });
+  }
+
+  const report = {
+    createdAt: new Date().toISOString(),
+    total: results.length,
+    passed: results.filter((item) => item.passed).length,
+    failed: results.filter((item) => !item.passed).length,
+    results,
+  };
+
+  await mkdir(reportDir, { recursive: true });
+
+  const filePath = path.join(reportDir, `eval-run-${Date.now()}.json`);
+  await writeFile(filePath, JSON.stringify(report, null, 2), "utf8");
+
+  console.log(JSON.stringify({ reportPath: filePath, ...report }, null, 2));
+  await pool.end();
+}
+
+async function loadCases(filePath: string): Promise<EvalCase[]> {
+  const raw = await readFile(filePath, "utf8");
+  return JSON.parse(raw) as EvalCase[];
+}
+
+function evaluateCase(
+  testCase: EvalCase,
+  summary: string,
+  toolCalls: Array<{ toolName: string; input: string; output: string }>,
+): string[] {
+  const failures: string[] = [];
+  const toolNames = toolCalls.map((item) => item.toolName);
+  const normalizedSummary = summary.toLowerCase();
+
+  for (const toolName of testCase.expectedTools ?? []) {
+    if (!toolNames.includes(toolName)) {
+      failures.push(`Expected tool "${toolName}" was not used.`);
+    }
+  }
+
+  for (const toolName of testCase.forbiddenTools ?? []) {
+    if (toolNames.includes(toolName)) {
+      failures.push(`Forbidden tool "${toolName}" was used.`);
+    }
+  }
+
+  for (const keyword of testCase.expectedKeywords ?? []) {
+    if (!normalizedSummary.includes(keyword.toLowerCase())) {
+      failures.push(`Expected keyword "${keyword}" was not found in summary.`);
+    }
+  }
+
+  if (typeof testCase.maxToolCalls === "number" && toolCalls.length > testCase.maxToolCalls) {
+    failures.push(`Tool call count ${toolCalls.length} exceeded limit ${testCase.maxToolCalls}.`);
+  }
+
+  return failures;
+}
+
+main().catch((error: unknown) => {
+  const message = error instanceof Error ? error.stack ?? error.message : String(error);
+  console.error(message);
+  process.exitCode = 1;
+});

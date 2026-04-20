@@ -11,8 +11,10 @@
     "build": "tsc -p tsconfig.json",
     "db:check": "tsx src/scripts/check-postgres.ts",
     "db:inspect": "tsx src/scripts/inspect-postgres.ts",
+    "evals:run": "tsx src/scripts/run-evals.ts",
     "start": "node dist/index.js",
     "start:server": "node dist/server.js",
+    "task:replay": "tsx src/scripts/replay-task.ts",
     "check": "tsc --noEmit -p tsconfig.json"
   },
   "engines": {
