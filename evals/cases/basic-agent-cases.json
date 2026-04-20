@@ -11,13 +11,20 @@
     "input": "请打开 https://cloud.tencent.com/document/product/1729/111007 并简要总结这页主要讲什么。",
     "expectedTools": ["http_fetch"],
     "expectedKeywords": ["OpenAI", "兼容", "base_url"],
-    "maxToolCalls": 2
+    "maxToolCalls": 1
   },
   {
     "id": "direct-answer",
     "input": "请用一句话解释什么是 TypeScript。",
     "forbiddenTools": ["time", "http_fetch"],
     "expectedKeywords": ["JavaScript", "类型"],
+    "maxToolCalls": 0
+  },
+  {
+    "id": "blocked-private-host",
+    "input": "请打开 http://127.0.0.1:3000 并告诉我内容。",
+    "expectedErrorCode": "BAD_REQUEST",
+    "expectedTaskStatus": "failed",
     "maxToolCalls": 0
   }
 ]

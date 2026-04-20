@@ -5,10 +5,21 @@ export class HttpFetchTool implements Tool {
   readonly name = "http_fetch";
   readonly description = "Fetches a web page and returns a compact plain-text summary source for reading and summarization tasks.";
 
-  constructor(private readonly options: { timeoutMs: number; retries: number; maxChars: number }) {}
+  constructor(
+    private readonly options: {
+      timeoutMs: number;
+      retries: number;
+      maxChars: number;
+      maxResponseBytes: number;
+      allowedContentTypes: string[];
+      allowHosts: string[];
+      denyHosts: string[];
+    },
+  ) {}
 
   async execute(input: ToolInput): Promise<string> {
     const url = this.extractUrl(input.input);
+    this.validateUrl(url);
     let lastError: unknown;
 
     for (let attempt = 1; attempt <= this.options.retries + 1; attempt += 1) {
@@ -25,14 +36,19 @@ export class HttpFetchTool implements Tool {
           throw new AppError("NETWORK_ERROR", `HttpFetchTool request failed with status ${response.status} for ${url}`);
         }
 
-        const body = await response.text();
         const contentType = response.headers.get("content-type") ?? "unknown";
-        const compactText = this.toPlainText(body).slice(0, this.options.maxChars);
+        this.validateContentType(contentType, url);
+
+        const body = await response.text();
+        const plainText = this.toPlainText(body);
+        const truncatedText = plainText.slice(0, this.options.maxResponseBytes);
+        const compactText = truncatedText.slice(0, this.options.maxChars);
 
         return [
           `URL: ${url}`,
           `Content-Type: ${contentType}`,
-          `Truncated: ${body.length > compactText.length}`,
+          `TruncatedByBytes: ${plainText.length > truncatedText.length}`,
+          `TruncatedByChars: ${truncatedText.length > compactText.length}`,
           "Content Preview:",
           compactText,
         ].join("\n\n");
@@ -66,14 +82,82 @@ export class HttpFetchTool implements Tool {
     return matched[0];
   }
 
+  private validateUrl(rawUrl: string): void {
+    const url = new URL(rawUrl);
+    const hostname = url.hostname.toLowerCase();
+
+    if (!["http:", "https:"].includes(url.protocol)) {
+      throw new AppError("BAD_REQUEST", `HttpFetchTool only supports http/https URLs: ${rawUrl}`);
+    }
+
+    if (this.options.denyHosts.includes(hostname)) {
+      throw new AppError("BAD_REQUEST", `HttpFetchTool blocked denied host: ${hostname}`);
+    }
+
+    if (this.options.allowHosts.length > 0 && !this.options.allowHosts.includes(hostname)) {
+      throw new AppError("BAD_REQUEST", `HttpFetchTool blocked host outside allowlist: ${hostname}`);
+    }
+
+    if (isPrivateHost(hostname)) {
+      throw new AppError("BAD_REQUEST", `HttpFetchTool blocked private or local host: ${hostname}`);
+    }
+  }
+
+  private validateContentType(contentType: string, url: string): void {
+    const normalized = contentType.toLowerCase();
+    const allowed = this.options.allowedContentTypes.some((item) => normalized.startsWith(item.toLowerCase()));
+
+    if (!allowed) {
+      throw new AppError("BAD_REQUEST", `HttpFetchTool blocked unsupported content type "${contentType}" for ${url}`);
+    }
+  }
+
   private toPlainText(raw: string): string {
-    return raw
+    const bodyMatch = raw.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    const source = bodyMatch?.[1] ?? raw;
+
+    return source
+      .replace(/<!--[\s\S]*?-->/g, " ")
       .replace(/<script[\s\S]*?<\/script>/gi, " ")
       .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+      .replace(/<svg[\s\S]*?<\/svg>/gi, " ")
       .replace(/<[^>]+>/g, " ")
       .replace(/&nbsp;/gi, " ")
       .replace(/&amp;/gi, "&")
+      .replace(/&quot;/gi, "\"")
+      .replace(/&#39;/gi, "'")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
       .replace(/\s+/g, " ")
       .trim();
   }
+}
+
+function isPrivateHost(hostname: string): boolean {
+  if (hostname === "localhost") {
+    return true;
+  }
+
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
+    const parts = hostname.split(".").map(Number);
+
+    if (parts[0] === 10) {
+      return true;
+    }
+
+    if (parts[0] === 127) {
+      return true;
+    }
+
+    if (parts[0] === 192 && parts[1] === 168) {
+      return true;
+    }
+
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) {
+      return true;
+    }
+  }
+
+  return false;
 }

@@ -28,11 +28,16 @@ export function createAgentRuntime(config: AppConfig) {
       timeoutMs: config.httpFetchTimeoutMs,
       maxChars: config.httpFetchMaxChars,
       retries: config.httpFetchRetries,
+      maxResponseBytes: config.httpFetchMaxResponseBytes,
+      allowedContentTypes: config.httpFetchAllowedContentTypes,
+      allowHosts: config.httpFetchAllowHosts,
+      denyHosts: config.httpFetchDenyHosts,
     }),
     new EchoTool(),
   ];
   const agent = new PlannerAgent({
     maxSteps: config.agentMaxSteps,
+    toolCallBudget: config.agentToolCallBudget,
   });
   const runner = new TaskRunner({ agent, tools, memory, llm, logger });
 

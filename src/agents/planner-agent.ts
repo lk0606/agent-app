@@ -2,7 +2,7 @@ import { AppError } from "../shared/app-error.js";
 import type { Agent, AgentContext, AgentRequest, AgentResponse } from "./base-agent.js";
 
 export class PlannerAgent implements Agent {
-  constructor(private readonly options: { maxSteps: number }) {}
+  constructor(private readonly options: { maxSteps: number; toolCallBudget: number }) {}
 
   async plan(request: AgentRequest, context: AgentContext): Promise<AgentResponse> {
     const toolCalls: AgentResponse["toolCalls"] = [];
@@ -31,6 +31,25 @@ export class PlannerAgent implements Agent {
       if (!decision.needsTool || !decision.toolName) {
         finalAnswer = decision.draftAnswer;
         break;
+      }
+
+      if (toolCalls.length >= this.options.toolCallBudget) {
+        context.logger.info("Tool budget reached", {
+          toolCallBudget: this.options.toolCallBudget,
+          attemptedToolName: decision.toolName,
+        });
+
+        const lastCall = toolCalls[toolCalls.length - 1];
+
+        if (lastCall) {
+          finalAnswer = await context.llm.answerWithTool({
+            userInput: request.input,
+            toolName: lastCall.toolName,
+            toolInput: lastCall.input,
+            toolOutput: lastCall.output,
+          });
+          break;
+        }
       }
 
       const tool = context.tools.find((item) => item.name === decision.toolName);

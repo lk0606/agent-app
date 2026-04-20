@@ -12,6 +12,8 @@ interface EvalCase {
   expectedTools?: string[];
   forbiddenTools?: string[];
   expectedKeywords?: string[];
+  expectedErrorCode?: string;
+  expectedTaskStatus?: "succeeded" | "failed";
   maxToolCalls?: number;
 }
 
@@ -21,7 +23,9 @@ interface EvalCaseResult {
   passed: boolean;
   failures: string[];
   durationMs: number;
-  summary: string;
+  summary: string | null;
+  taskStatus: "succeeded" | "failed";
+  errorCode: string | null;
   toolCalls: Array<{
     toolName: string;
     input: string;
@@ -43,13 +47,26 @@ async function main(): Promise<void> {
     const startedAt = Date.now();
     logger.info("Eval case started", { caseId: testCase.id, taskId });
 
-    const result = await runner.run({
-      taskId,
-      input: testCase.input,
-    });
+    let summary: string | null = null;
+    let toolCalls: EvalCaseResult["toolCalls"] = [];
+    let taskStatus: EvalCaseResult["taskStatus"] = "succeeded";
+    let errorCode: string | null = null;
+
+    try {
+      const result = await runner.run({
+        taskId,
+        input: testCase.input,
+      });
+
+      summary = result.summary;
+      toolCalls = result.toolCalls;
+    } catch (error: unknown) {
+      taskStatus = "failed";
+      errorCode = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code ?? "") : null;
+    }
 
     const durationMs = Date.now() - startedAt;
-    const failures = evaluateCase(testCase, result.summary, result.toolCalls);
+    const failures = evaluateCase(testCase, summary, toolCalls, taskStatus, errorCode);
 
     results.push({
       id: testCase.id,
@@ -57,8 +74,10 @@ async function main(): Promise<void> {
       passed: failures.length === 0,
       failures,
       durationMs,
-      summary: result.summary,
-      toolCalls: result.toolCalls,
+      summary,
+      taskStatus,
+      errorCode,
+      toolCalls,
     });
 
     logger.info("Eval case finished", {
@@ -94,12 +113,22 @@ async function loadCases(filePath: string): Promise<EvalCase[]> {
 
 function evaluateCase(
   testCase: EvalCase,
-  summary: string,
+  summary: string | null,
   toolCalls: Array<{ toolName: string; input: string; output: string }>,
+  taskStatus: "succeeded" | "failed",
+  errorCode: string | null,
 ): string[] {
   const failures: string[] = [];
   const toolNames = toolCalls.map((item) => item.toolName);
-  const normalizedSummary = summary.toLowerCase();
+  const normalizedSummary = (summary ?? "").toLowerCase();
+
+  if (testCase.expectedTaskStatus && taskStatus !== testCase.expectedTaskStatus) {
+    failures.push(`Expected task status "${testCase.expectedTaskStatus}" but got "${taskStatus}".`);
+  }
+
+  if (testCase.expectedErrorCode && errorCode !== testCase.expectedErrorCode) {
+    failures.push(`Expected error code "${testCase.expectedErrorCode}" but got "${errorCode}".`);
+  }
 
   for (const toolName of testCase.expectedTools ?? []) {
     if (!toolNames.includes(toolName)) {
