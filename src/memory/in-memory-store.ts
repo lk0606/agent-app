@@ -1,15 +1,67 @@
-import type { TaskRecord, ToolCallRecord } from "./persistence-model.ts";
-import type { MemoryMessage, MemoryStore } from "./memory-store.ts";
+import type { SessionRecord, TaskRecord, ToolCallRecord } from "./persistence-model.js";
+import type { MemoryMessage, MemoryStore } from "./memory-store.js";
 
 export class InMemoryStore implements MemoryStore {
+  private readonly sessions = new Map<string, SessionRecord>();
   private readonly tasks = new Map<string, TaskRecord>();
   private readonly store = new Map<string, MemoryMessage[]>();
   private readonly toolCalls = new Map<string, ToolCallRecord[]>();
 
-  async createTask(input: { id: string; input: string; status: TaskRecord["status"] }): Promise<void> {
+  async createSession(input: {
+    id: string;
+    title?: string | null;
+    userId?: string | null;
+    status?: SessionRecord["status"];
+  }): Promise<void> {
+    const now = new Date().toISOString();
+    this.sessions.set(input.id, {
+      id: input.id,
+      title: input.title ?? null,
+      userId: input.userId ?? null,
+      status: input.status ?? "active",
+      createdAt: now,
+      updatedAt: now,
+      lastTaskAt: null,
+    });
+  }
+
+  async updateSession(
+    sessionId: string,
+    input: {
+      title?: string | null;
+      status?: SessionRecord["status"];
+      lastTaskAt?: string | null;
+    },
+  ): Promise<void> {
+    const current = this.sessions.get(sessionId);
+
+    if (!current) {
+      return;
+    }
+
+    this.sessions.set(sessionId, {
+      ...current,
+      title: input.title ?? current.title,
+      status: input.status ?? current.status,
+      lastTaskAt: input.lastTaskAt ?? current.lastTaskAt,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  async getSession(sessionId: string): Promise<SessionRecord | null> {
+    return this.sessions.get(sessionId) ?? null;
+  }
+
+  async createTask(input: {
+    id: string;
+    sessionId?: string | null;
+    input: string;
+    status: TaskRecord["status"];
+  }): Promise<void> {
     const now = new Date().toISOString();
     this.tasks.set(input.id, {
       id: input.id,
+      sessionId: input.sessionId ?? null,
       input: input.input,
       status: input.status,
       summary: null,

@@ -2,8 +2,21 @@ export type TaskStatus = "pending" | "running" | "succeeded" | "failed";
 
 export type ToolCallStatus = "succeeded" | "failed" | "skipped";
 
+export type SessionStatus = "active" | "archived";
+
+export interface SessionRecord {
+  id: string;
+  title: string | null;
+  userId: string | null;
+  status: SessionStatus;
+  createdAt: string;
+  updatedAt: string;
+  lastTaskAt: string | null;
+}
+
 export interface TaskRecord {
   id: string;
+  sessionId?: string | null;
   input: string;
   status: TaskStatus;
   summary: string | null;

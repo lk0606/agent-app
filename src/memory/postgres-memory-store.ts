@@ -1,25 +1,39 @@
 import type { Pool } from "pg";
 
-import type { TaskRecord } from "./persistence-model.js";
+import type { SessionRecord, TaskRecord } from "./persistence-model.js";
 import type {
+  CreateSessionInput,
   CreateTaskInput,
   MemoryMessage,
   MemoryStore,
   RecordToolCallInput,
+  UpdateSessionInput,
   UpdateTaskInput,
 } from "./memory-store.js";
 
 export class PostgresMemoryStore implements MemoryStore {
   constructor(private readonly pool: Pool) {}
 
+  async createSession(_input: CreateSessionInput): Promise<void> {
+    throw new Error("Session persistence is not implemented yet. This will be added in the next step.");
+  }
+
+  async updateSession(_sessionId: string, _input: UpdateSessionInput): Promise<void> {
+    throw new Error("Session persistence is not implemented yet. This will be added in the next step.");
+  }
+
+  async getSession(_sessionId: string): Promise<SessionRecord | null> {
+    return null;
+  }
+
   async createTask(input: CreateTaskInput): Promise<void> {
     await this.pool.query(
       `
-        insert into tasks (id, input, status)
-        values ($1, $2, $3)
+        insert into tasks (id, session_id, input, status)
+        values ($1, $2, $3, $4)
         on conflict (id) do nothing
       `,
-      [input.id, input.input, input.status],
+      [input.id, input.sessionId ?? null, input.input, input.status],
     );
   }
 
@@ -45,6 +59,7 @@ export class PostgresMemoryStore implements MemoryStore {
       `
         select
           id,
+          session_id,
           input,
           status,
           summary,
@@ -67,6 +82,7 @@ export class PostgresMemoryStore implements MemoryStore {
 
     return {
       id: row.id,
+      sessionId: row.session_id,
       input: row.input,
       status: row.status,
       summary: row.summary,
