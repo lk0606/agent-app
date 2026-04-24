@@ -14,6 +14,7 @@
 - `docs/persistence-model.md`：持久化模型设计
 - `docs/postgres-setup.md`：本地 PostgreSQL 启动说明
 - `docs/evals-and-replay.md`：评测与回放说明
+- `docs/time-handling.md`：时间存储与前端展示规范
 - `src/`：Agent 应用骨架代码
 
 ## 当前脚手架能力
