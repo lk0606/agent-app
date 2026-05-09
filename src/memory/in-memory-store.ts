@@ -1,5 +1,5 @@
 import type { SessionRecord, TaskRecord, ToolCallRecord } from "./persistence-model.js";
-import type { MemoryMessage, MemoryStore } from "./memory-store.js";
+import type { MemoryMessage, MemoryStore, SessionMemoryMessage } from "./memory-store.js";
 
 export class InMemoryStore implements MemoryStore {
   private readonly sessions = new Map<string, SessionRecord>();
@@ -112,6 +112,27 @@ export class InMemoryStore implements MemoryStore {
 
   async list(taskId: string): Promise<MemoryMessage[]> {
     return this.store.get(taskId) ?? [];
+  }
+
+  async listSessionMessages(sessionId: string, limit: number): Promise<SessionMemoryMessage[]> {
+    const rows: SessionMemoryMessage[] = [];
+
+    for (const [taskId, task] of this.tasks.entries()) {
+      if (task.sessionId !== sessionId) {
+        continue;
+      }
+
+      for (const message of this.store.get(taskId) ?? []) {
+        rows.push({
+          taskId,
+          ...message,
+        });
+      }
+    }
+
+    return rows
+      .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
+      .slice(-limit);
   }
 
   async recordToolCall(input: {

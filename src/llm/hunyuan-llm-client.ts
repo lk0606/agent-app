@@ -95,6 +95,7 @@ export class HunyuanLlmClient implements LlmClient {
           {
             role: "user",
             content: [
+              this.buildConversationHistory(input.conversationHistory),
               `User input: ${input.userInput}`,
               `Tool used: ${input.toolName}`,
               `Tool input: ${input.toolInput}`,
@@ -150,9 +151,25 @@ export class HunyuanLlmClient implements LlmClient {
             )
             .join("\n\n");
 
-    return [`User input:\n${input.userInput}`, `Available tools:\n${tools}`, `Previous tool results:\n${history}`].join(
-      "\n\n",
-    );
+    return [
+      this.buildConversationHistory(input.conversationHistory),
+      `User input:\n${input.userInput}`,
+      `Available tools:\n${tools}`,
+      `Previous tool results:\n${history}`,
+    ].join("\n\n");
+  }
+
+  private buildConversationHistory(history: PlanRequest["conversationHistory"] | AnswerRequest["conversationHistory"]): string {
+    if (history.length === 0) {
+      return "Conversation history:\nNo previous session messages.";
+    }
+
+    return [
+      "Conversation history:",
+      history
+        .map((item, index) => `[${index + 1}] ${item.role}: ${item.content}`)
+        .join("\n"),
+    ].join("\n");
   }
 }
 

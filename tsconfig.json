@@ -3,10 +3,6 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "baseUrl": ".",
-    "paths": {
-      "pg": ["./node_modules/@types/pg/index.d.mts"]
-    },
     "outDir": "dist",
     "rootDir": "src",
     "strict": true,

@@ -11,6 +11,10 @@ export interface PlannerDecision {
 }
 
 export interface PlanRequest {
+  conversationHistory: Array<{
+    role: "user" | "assistant" | "tool";
+    content: string;
+  }>;
   userInput: string;
   tools: ToolDefinition[];
   previousToolCalls: Array<{
@@ -21,6 +25,10 @@ export interface PlanRequest {
 }
 
 export interface AnswerRequest {
+  conversationHistory: Array<{
+    role: "user" | "assistant" | "tool";
+    content: string;
+  }>;
   userInput: string;
   toolName: string;
   toolInput: string;

@@ -6,6 +6,10 @@ export interface MemoryMessage {
   timestamp: string;
 }
 
+export interface SessionMemoryMessage extends MemoryMessage {
+  taskId: string;
+}
+
 export interface CreateTaskInput {
   id: string;
   sessionId?: string | null;
@@ -56,5 +60,6 @@ export interface MemoryStore {
   getTask(taskId: string): Promise<TaskRecord | null>;
   append(taskId: string, message: MemoryMessage): Promise<void>;
   list(taskId: string): Promise<MemoryMessage[]>;
+  listSessionMessages(sessionId: string, limit: number): Promise<SessionMemoryMessage[]>;
   recordToolCall(input: RecordToolCallInput): Promise<void>;
 }

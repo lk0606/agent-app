@@ -5,11 +5,26 @@ export class PlannerAgent implements Agent {
   constructor(private readonly options: { maxSteps: number; toolCallBudget: number }) {}
 
   async plan(request: AgentRequest, context: AgentContext): Promise<AgentResponse> {
+    const conversationHistory =
+      request.sessionId ? await context.memory.listSessionMessages(request.sessionId, 8) : [];
+    const llmConversationHistory = conversationHistory
+      .filter((item) => item.taskId !== request.taskId)
+      .flatMap((item) =>
+        item.role === "user" || item.role === "assistant" || item.role === "tool"
+          ? [
+              {
+                role: item.role,
+                content: item.content,
+              },
+            ]
+          : [],
+      );
     const toolCalls: AgentResponse["toolCalls"] = [];
     let finalAnswer = "";
 
     for (let step = 0; step < this.options.maxSteps; step += 1) {
       const decision = await context.llm.plan({
+        conversationHistory: llmConversationHistory,
         userInput: request.input,
         tools: context.tools.map((tool) => ({
           name: tool.name,
@@ -43,6 +58,7 @@ export class PlannerAgent implements Agent {
 
         if (lastCall) {
           finalAnswer = await context.llm.answerWithTool({
+            conversationHistory: llmConversationHistory,
             userInput: request.input,
             toolName: lastCall.toolName,
             toolInput: lastCall.input,
@@ -69,6 +85,7 @@ export class PlannerAgent implements Agent {
         });
 
         finalAnswer = await context.llm.answerWithTool({
+          conversationHistory: llmConversationHistory,
           userInput: request.input,
           toolName: existingCall.toolName,
           toolInput: existingCall.input,
@@ -143,6 +160,7 @@ export class PlannerAgent implements Agent {
       }
 
       finalAnswer = await context.llm.answerWithTool({
+        conversationHistory: llmConversationHistory,
         userInput: request.input,
         toolName: lastCall.toolName,
         toolInput: lastCall.input,

@@ -7,6 +7,7 @@ import type {
   MemoryMessage,
   MemoryStore,
   RecordToolCallInput,
+  SessionMemoryMessage,
   UpdateSessionInput,
   UpdateTaskInput,
 } from "./memory-store.js";
@@ -157,6 +158,35 @@ export class PostgresMemoryStore implements MemoryStore {
     );
 
     return result.rows.map((row) => ({
+      role: row.role,
+      content: row.content,
+      timestamp: row.created_at.toISOString(),
+    }));
+  }
+
+  async listSessionMessages(sessionId: string, limit: number): Promise<SessionMemoryMessage[]> {
+    const result = await this.pool.query(
+      `
+        select *
+        from (
+          select
+            m.task_id,
+            m.role,
+            m.content,
+            m.created_at
+          from messages m
+          inner join tasks t on t.id = m.task_id
+          where t.session_id = $1
+          order by m.created_at desc, m.id desc
+          limit $2
+        ) recent
+        order by created_at asc
+      `,
+      [sessionId, limit],
+    );
+
+    return result.rows.map((row) => ({
+      taskId: row.task_id,
       role: row.role,
       content: row.content,
       timestamp: row.created_at.toISOString(),
