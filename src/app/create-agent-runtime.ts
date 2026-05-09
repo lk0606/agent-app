@@ -38,6 +38,8 @@ export function createAgentRuntime(config: AppConfig) {
   const agent = new PlannerAgent({
     maxSteps: config.agentMaxSteps,
     toolCallBudget: config.agentToolCallBudget,
+    sessionHistoryMessageLimit: config.sessionHistoryMessageLimit,
+    sessionHistoryCharBudget: config.sessionHistoryCharBudget,
   });
   const runner = new TaskRunner({ agent, tools, memory, llm, logger });
 

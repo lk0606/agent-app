@@ -1,24 +1,27 @@
 import { AppError } from "../shared/app-error.js";
 import type { Agent, AgentContext, AgentRequest, AgentResponse } from "./base-agent.js";
 
+type LlmConversationMessage = {
+  role: "user" | "assistant" | "tool";
+  content: string;
+};
+
 export class PlannerAgent implements Agent {
-  constructor(private readonly options: { maxSteps: number; toolCallBudget: number }) {}
+  constructor(
+    private readonly options: {
+      maxSteps: number;
+      toolCallBudget: number;
+      sessionHistoryMessageLimit: number;
+      sessionHistoryCharBudget: number;
+    },
+  ) {}
 
   async plan(request: AgentRequest, context: AgentContext): Promise<AgentResponse> {
     const conversationHistory =
-      request.sessionId ? await context.memory.listSessionMessages(request.sessionId, 8) : [];
-    const llmConversationHistory = conversationHistory
-      .filter((item) => item.taskId !== request.taskId)
-      .flatMap((item) =>
-        item.role === "user" || item.role === "assistant" || item.role === "tool"
-          ? [
-              {
-                role: item.role,
-                content: item.content,
-              },
-            ]
-          : [],
-      );
+      request.sessionId
+        ? await context.memory.listSessionMessages(request.sessionId, this.options.sessionHistoryMessageLimit)
+        : [];
+    const llmConversationHistory = this.buildLlmConversationHistory(conversationHistory, request.taskId);
     const toolCalls: AgentResponse["toolCalls"] = [];
     let finalAnswer = "";
 
@@ -178,5 +181,36 @@ export class PlannerAgent implements Agent {
       summary: finalAnswer,
       toolCalls,
     };
+  }
+
+  private buildLlmConversationHistory(
+    conversationHistory: Awaited<ReturnType<AgentContext["memory"]["listSessionMessages"]>>,
+    currentTaskId: string,
+  ): LlmConversationMessage[] {
+    const filteredHistory = conversationHistory.filter(
+      (item): item is typeof item & { role: LlmConversationMessage["role"] } =>
+        item.taskId !== currentTaskId && (item.role === "user" || item.role === "assistant" || item.role === "tool"),
+    );
+    const result: LlmConversationMessage[] = [];
+    let remainingChars = this.options.sessionHistoryCharBudget;
+
+    for (let index = filteredHistory.length - 1; index >= 0; index -= 1) {
+      const item = filteredHistory[index];
+
+      if (remainingChars <= 0) {
+        break;
+      }
+
+      const content = item.content.length > remainingChars ? item.content.slice(-remainingChars) : item.content;
+
+      result.unshift({
+        role: item.role,
+        content,
+      });
+
+      remainingChars -= content.length;
+    }
+
+    return result;
   }
 }

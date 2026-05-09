@@ -15,6 +15,7 @@
 - `docs/postgres-setup.md`：本地 PostgreSQL 启动说明
 - `docs/evals-and-replay.md`：评测与回放说明
 - `docs/time-handling.md`：时间存储与前端展示规范
+- `docs/session-context.md`：会话上下文窗口策略
 - `src/`：Agent 应用骨架代码
 
 ## 当前脚手架能力
@@ -46,6 +47,8 @@ HUNYUAN_MODEL=hunyuan-turbos-latest
 HUNYUAN_BASE_URL=https://api.hunyuan.cloud.tencent.com/v1
 AGENT_MAX_STEPS=3
 AGENT_TOOL_CALL_BUDGET=2
+SESSION_HISTORY_MESSAGE_LIMIT=8
+SESSION_HISTORY_CHAR_BUDGET=4000
 HTTP_FETCH_TIMEOUT_MS=8000
 HTTP_FETCH_RETRIES=2
 HTTP_FETCH_MAX_CHARS=4000

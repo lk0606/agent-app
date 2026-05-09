@@ -7,6 +7,8 @@ export interface AppConfig {
   databaseUrl: string;
   agentMaxSteps: number;
   agentToolCallBudget: number;
+  sessionHistoryMessageLimit: number;
+  sessionHistoryCharBudget: number;
   httpFetchTimeoutMs: number;
   httpFetchRetries: number;
   httpFetchMaxChars: number;
@@ -39,6 +41,8 @@ export function loadConfig(): AppConfig {
     databaseUrl,
     agentMaxSteps: readNumber("AGENT_MAX_STEPS", 3),
     agentToolCallBudget: readNumber("AGENT_TOOL_CALL_BUDGET", 2),
+    sessionHistoryMessageLimit: readNumber("SESSION_HISTORY_MESSAGE_LIMIT", 8),
+    sessionHistoryCharBudget: readNumber("SESSION_HISTORY_CHAR_BUDGET", 4000),
     httpFetchTimeoutMs: readNumber("HTTP_FETCH_TIMEOUT_MS", 8000),
     httpFetchRetries: readNumber("HTTP_FETCH_RETRIES", 2),
     httpFetchMaxChars: readNumber("HTTP_FETCH_MAX_CHARS", 4000),
