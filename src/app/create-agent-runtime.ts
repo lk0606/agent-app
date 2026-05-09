@@ -43,6 +43,7 @@ export function createAgentRuntime(config: AppConfig) {
 
   return {
     logger,
+    memory,
     runner,
     pool,
   };

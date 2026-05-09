@@ -24,9 +24,16 @@ export class TaskRunner {
     try {
       await this.deps.memory.createTask({
         id: request.taskId,
+        sessionId: request.sessionId ?? null,
         input: request.input,
         status: "running",
       });
+
+      if (request.sessionId) {
+        await this.deps.memory.updateSession(request.sessionId, {
+          lastTaskAt: new Date().toISOString(),
+        });
+      }
 
       await this.deps.memory.append(request.taskId, {
         role: "user",

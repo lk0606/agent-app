@@ -12,6 +12,7 @@ export interface AgentContext {
 
 export interface AgentRequest {
   taskId: string;
+  sessionId?: string | null;
   input: string;
 }
 

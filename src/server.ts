@@ -9,7 +9,7 @@ import { AppError, classifyError } from "./shared/app-error.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  const { runner, logger, pool } = createAgentRuntime(config);
+  const { runner, logger, memory, pool } = createAgentRuntime(config);
 
   const server = createServer(async (req, res) => {
     try {
@@ -27,11 +27,29 @@ async function main(): Promise<void> {
           throw new AppError("BAD_REQUEST", "Request body must contain a non-empty input string.");
         }
 
+        let sessionId =
+          typeof body.sessionId === "string" && body.sessionId.trim().length > 0 ? body.sessionId.trim() : null;
+
+        if (!sessionId) {
+          sessionId = randomUUID();
+          await memory.createSession({
+            id: sessionId,
+          });
+        } else {
+          const session = await memory.getSession(sessionId);
+
+          if (!session) {
+            await memory.createSession({
+              id: sessionId,
+            });
+          }
+        }
+
         const taskId = typeof body.taskId === "string" && body.taskId.length > 0 ? body.taskId : randomUUID();
-        const result = await runner.run({ taskId, input });
+        const result = await runner.run({ taskId, sessionId, input });
 
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ taskId, result }, null, 2));
+        res.end(JSON.stringify({ sessionId, taskId, result }, null, 2));
         return;
       }
 

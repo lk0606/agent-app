@@ -14,16 +14,57 @@ import type {
 export class PostgresMemoryStore implements MemoryStore {
   constructor(private readonly pool: Pool) {}
 
-  async createSession(_input: CreateSessionInput): Promise<void> {
-    throw new Error("Session persistence is not implemented yet. This will be added in the next step.");
+  async createSession(input: CreateSessionInput): Promise<void> {
+    await this.pool.query(
+      `
+        insert into sessions (id, title, user_id, status)
+        values ($1, $2, $3, $4)
+        on conflict (id) do nothing
+      `,
+      [input.id, input.title ?? null, input.userId ?? null, input.status ?? "active"],
+    );
   }
 
-  async updateSession(_sessionId: string, _input: UpdateSessionInput): Promise<void> {
-    throw new Error("Session persistence is not implemented yet. This will be added in the next step.");
+  async updateSession(sessionId: string, input: UpdateSessionInput): Promise<void> {
+    await this.pool.query(
+      `
+        update sessions
+        set
+          title = coalesce($2, title),
+          status = coalesce($3, status),
+          updated_at = now(),
+          last_task_at = coalesce($4, last_task_at)
+        where id = $1
+      `,
+      [sessionId, input.title ?? null, input.status ?? null, input.lastTaskAt ?? null],
+    );
   }
 
-  async getSession(_sessionId: string): Promise<SessionRecord | null> {
-    return null;
+  async getSession(sessionId: string): Promise<SessionRecord | null> {
+    const result = await this.pool.query(
+      `
+        select id, title, user_id, status, created_at, updated_at, last_task_at
+        from sessions
+        where id = $1
+      `,
+      [sessionId],
+    );
+
+    const row = result.rows[0];
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      id: row.id,
+      title: row.title,
+      userId: row.user_id,
+      status: row.status,
+      createdAt: row.created_at.toISOString(),
+      updatedAt: row.updated_at.toISOString(),
+      lastTaskAt: row.last_task_at ? row.last_task_at.toISOString() : null,
+    };
   }
 
   async createTask(input: CreateTaskInput): Promise<void> {
