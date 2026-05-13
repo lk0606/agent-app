@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 
 import { AppError } from "../shared/app-error.js";
-import type { AnswerRequest, LlmClient, PlanRequest, PlannerDecision } from "./llm-client.js";
+import type { AnswerRequest, LlmClient, PlanRequest, PlannerDecision, SessionSummaryRequest } from "./llm-client.js";
 
 export class HunyuanLlmClient implements LlmClient {
   private readonly client: OpenAI;
@@ -95,7 +95,7 @@ export class HunyuanLlmClient implements LlmClient {
           {
             role: "user",
             content: [
-              this.buildConversationHistory(input.conversationHistory),
+              this.buildConversationHistory(input.conversationHistory, input.sessionSummary),
               `User input: ${input.userInput}`,
               `Tool used: ${input.toolName}`,
               `Tool input: ${input.toolInput}`,
@@ -109,6 +109,38 @@ export class HunyuanLlmClient implements LlmClient {
       return this.readMessageContent(message?.content);
     } catch (error: unknown) {
       throw new AppError("LLM_ERROR", "Hunyuan answer generation failed.", { cause: stringifyError(error) });
+    }
+  }
+
+  async summarizeSession(input: SessionSummaryRequest): Promise<string> {
+    try {
+      const completion = await this.client.chat.completions.create({
+        model: this.options.model,
+        messages: [
+          {
+            role: "system",
+            content: [
+              "You summarize earlier conversation history for a Node agent.",
+              "Keep only stable user facts, prior decisions, and important tool findings.",
+              "Be concise. Prefer 3 to 6 short bullet-like lines in plain text.",
+              "Omit chit-chat and low-value repetition.",
+            ].join(" "),
+          },
+          {
+            role: "user",
+            content: [
+              `Current user input: ${input.currentUserInput}`,
+              "Earlier session history to summarize:",
+              input.messages.map((item, index) => `[${index + 1}] ${item.role}: ${item.content}`).join("\n"),
+            ].join("\n\n"),
+          },
+        ],
+      });
+
+      const message = completion.choices[0]?.message;
+      return this.readMessageContent(message?.content);
+    } catch (error: unknown) {
+      throw new AppError("LLM_ERROR", "Hunyuan session summarization failed.", { cause: stringifyError(error) });
     }
   }
 
@@ -152,24 +184,36 @@ export class HunyuanLlmClient implements LlmClient {
             .join("\n\n");
 
     return [
-      this.buildConversationHistory(input.conversationHistory),
+      this.buildConversationHistory(input.conversationHistory, input.sessionSummary),
       `User input:\n${input.userInput}`,
       `Available tools:\n${tools}`,
       `Previous tool results:\n${history}`,
     ].join("\n\n");
   }
 
-  private buildConversationHistory(history: PlanRequest["conversationHistory"] | AnswerRequest["conversationHistory"]): string {
-    if (history.length === 0) {
-      return "Conversation history:\nNo previous session messages.";
+  private buildConversationHistory(
+    history: PlanRequest["conversationHistory"] | AnswerRequest["conversationHistory"],
+    sessionSummary?: string | null,
+  ): string {
+    const sections: string[] = [];
+
+    if (sessionSummary && sessionSummary.trim().length > 0) {
+      sections.push(`Earlier session summary:\n${sessionSummary}`);
     }
 
-    return [
+    if (history.length === 0) {
+      sections.push("Conversation history:\nNo recent session messages.");
+      return sections.join("\n\n");
+    }
+
+    sections.push([
       "Conversation history:",
       history
         .map((item, index) => `[${index + 1}] ${item.role}: ${item.content}`)
         .join("\n"),
-    ].join("\n");
+    ].join("\n"));
+
+    return sections.join("\n\n");
   }
 }
 

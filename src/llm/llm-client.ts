@@ -11,6 +11,7 @@ export interface PlannerDecision {
 }
 
 export interface PlanRequest {
+  sessionSummary?: string | null;
   conversationHistory: Array<{
     role: "user" | "assistant" | "tool";
     content: string;
@@ -25,6 +26,7 @@ export interface PlanRequest {
 }
 
 export interface AnswerRequest {
+  sessionSummary?: string | null;
   conversationHistory: Array<{
     role: "user" | "assistant" | "tool";
     content: string;
@@ -35,7 +37,16 @@ export interface AnswerRequest {
   toolOutput: string;
 }
 
+export interface SessionSummaryRequest {
+  messages: Array<{
+    role: "user" | "assistant" | "tool";
+    content: string;
+  }>;
+  currentUserInput: string;
+}
+
 export interface LlmClient {
   plan(input: PlanRequest): Promise<PlannerDecision>;
   answerWithTool(input: AnswerRequest): Promise<string>;
+  summarizeSession(input: SessionSummaryRequest): Promise<string>;
 }

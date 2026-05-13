@@ -60,6 +60,7 @@ export interface MemoryStore {
   getTask(taskId: string): Promise<TaskRecord | null>;
   append(taskId: string, message: MemoryMessage): Promise<void>;
   list(taskId: string): Promise<MemoryMessage[]>;
+  listAllSessionMessages(sessionId: string): Promise<SessionMemoryMessage[]>;
   listSessionMessages(sessionId: string, limit: number): Promise<SessionMemoryMessage[]>;
   recordToolCall(input: RecordToolCallInput): Promise<void>;
 }

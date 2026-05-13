@@ -114,7 +114,7 @@ export class InMemoryStore implements MemoryStore {
     return this.store.get(taskId) ?? [];
   }
 
-  async listSessionMessages(sessionId: string, limit: number): Promise<SessionMemoryMessage[]> {
+  async listAllSessionMessages(sessionId: string): Promise<SessionMemoryMessage[]> {
     const rows: SessionMemoryMessage[] = [];
 
     for (const [taskId, task] of this.tasks.entries()) {
@@ -130,9 +130,12 @@ export class InMemoryStore implements MemoryStore {
       }
     }
 
-    return rows
-      .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
-      .slice(-limit);
+    return rows.sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+  }
+
+  async listSessionMessages(sessionId: string, limit: number): Promise<SessionMemoryMessage[]> {
+    const rows = await this.listAllSessionMessages(sessionId);
+    return rows.slice(-limit);
   }
 
   async recordToolCall(input: {

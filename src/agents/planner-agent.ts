@@ -17,17 +17,16 @@ export class PlannerAgent implements Agent {
   ) {}
 
   async plan(request: AgentRequest, context: AgentContext): Promise<AgentResponse> {
-    const conversationHistory =
-      request.sessionId
-        ? await context.memory.listSessionMessages(request.sessionId, this.options.sessionHistoryMessageLimit)
-        : [];
-    const llmConversationHistory = this.buildLlmConversationHistory(conversationHistory, request.taskId);
+    const sessionContext = request.sessionId
+      ? await this.buildSessionContext(request, context)
+      : { recentHistory: [] as LlmConversationMessage[], sessionSummary: null as string | null };
     const toolCalls: AgentResponse["toolCalls"] = [];
     let finalAnswer = "";
 
     for (let step = 0; step < this.options.maxSteps; step += 1) {
       const decision = await context.llm.plan({
-        conversationHistory: llmConversationHistory,
+        sessionSummary: sessionContext.sessionSummary,
+        conversationHistory: sessionContext.recentHistory,
         userInput: request.input,
         tools: context.tools.map((tool) => ({
           name: tool.name,
@@ -61,7 +60,8 @@ export class PlannerAgent implements Agent {
 
         if (lastCall) {
           finalAnswer = await context.llm.answerWithTool({
-            conversationHistory: llmConversationHistory,
+            sessionSummary: sessionContext.sessionSummary,
+            conversationHistory: sessionContext.recentHistory,
             userInput: request.input,
             toolName: lastCall.toolName,
             toolInput: lastCall.input,
@@ -88,7 +88,8 @@ export class PlannerAgent implements Agent {
         });
 
         finalAnswer = await context.llm.answerWithTool({
-          conversationHistory: llmConversationHistory,
+          sessionSummary: sessionContext.sessionSummary,
+          conversationHistory: sessionContext.recentHistory,
           userInput: request.input,
           toolName: existingCall.toolName,
           toolInput: existingCall.input,
@@ -163,7 +164,8 @@ export class PlannerAgent implements Agent {
       }
 
       finalAnswer = await context.llm.answerWithTool({
-        conversationHistory: llmConversationHistory,
+        sessionSummary: sessionContext.sessionSummary,
+        conversationHistory: sessionContext.recentHistory,
         userInput: request.input,
         toolName: lastCall.toolName,
         toolInput: lastCall.input,
@@ -180,6 +182,33 @@ export class PlannerAgent implements Agent {
     return {
       summary: finalAnswer,
       toolCalls,
+    };
+  }
+
+  private async buildSessionContext(request: AgentRequest, context: AgentContext): Promise<{
+    sessionSummary: string | null;
+    recentHistory: LlmConversationMessage[];
+  }> {
+    const allMessages = await context.memory.listAllSessionMessages(request.sessionId!);
+    const llmMessages = this.buildLlmConversationHistory(allMessages, request.taskId);
+    const recentHistory = llmMessages.slice(-this.options.sessionHistoryMessageLimit);
+    const olderMessages = llmMessages.slice(0, Math.max(0, llmMessages.length - recentHistory.length));
+
+    if (olderMessages.length === 0) {
+      return {
+        sessionSummary: null,
+        recentHistory,
+      };
+    }
+
+    const sessionSummary = await context.llm.summarizeSession({
+      messages: olderMessages,
+      currentUserInput: request.input,
+    });
+
+    return {
+      sessionSummary,
+      recentHistory,
     };
   }
 

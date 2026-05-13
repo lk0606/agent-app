@@ -164,25 +164,20 @@ export class PostgresMemoryStore implements MemoryStore {
     }));
   }
 
-  async listSessionMessages(sessionId: string, limit: number): Promise<SessionMemoryMessage[]> {
+  async listAllSessionMessages(sessionId: string): Promise<SessionMemoryMessage[]> {
     const result = await this.pool.query(
       `
-        select *
-        from (
-          select
-            m.task_id,
-            m.role,
-            m.content,
-            m.created_at
-          from messages m
-          inner join tasks t on t.id = m.task_id
-          where t.session_id = $1
-          order by m.created_at desc, m.id desc
-          limit $2
-        ) recent
-        order by created_at asc
+        select
+          m.task_id,
+          m.role,
+          m.content,
+          m.created_at
+        from messages m
+        inner join tasks t on t.id = m.task_id
+        where t.session_id = $1
+        order by m.created_at asc, m.id asc
       `,
-      [sessionId, limit],
+      [sessionId],
     );
 
     return result.rows.map((row) => ({
@@ -191,6 +186,11 @@ export class PostgresMemoryStore implements MemoryStore {
       content: row.content,
       timestamp: row.created_at.toISOString(),
     }));
+  }
+
+  async listSessionMessages(sessionId: string, limit: number): Promise<SessionMemoryMessage[]> {
+    const rows = await this.listAllSessionMessages(sessionId);
+    return rows.slice(-limit);
   }
 
   async recordToolCall(input: RecordToolCallInput): Promise<void> {
