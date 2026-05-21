@@ -15,6 +15,7 @@ import type {
 export class PostgresMemoryStore implements MemoryStore {
   constructor(private readonly pool: Pool) {}
 
+  // 创建会话时允许重复调用，HTTP 层复用 sessionId 时不会因为并发重复创建而失败。
   async createSession(input: CreateSessionInput): Promise<void> {
     await this.pool.query(
       `
@@ -26,25 +27,49 @@ export class PostgresMemoryStore implements MemoryStore {
     );
   }
 
+  // 只更新传入字段；未传字段继续保留数据库里的旧值。
   async updateSession(sessionId: string, input: UpdateSessionInput): Promise<void> {
     await this.pool.query(
       `
         update sessions
         set
+          -- coalesce 让调用方可以只传要改的字段；传 null/undefined 时保持原值。
           title = coalesce($2, title),
           status = coalesce($3, status),
           updated_at = now(),
-          last_task_at = coalesce($4, last_task_at)
+          last_task_at = coalesce($4, last_task_at),
+          summary = coalesce($5, summary),
+          summary_message_count = coalesce($6, summary_message_count),
+          summary_updated_at = coalesce($7, summary_updated_at)
         where id = $1
       `,
-      [sessionId, input.title ?? null, input.status ?? null, input.lastTaskAt ?? null],
+      [
+        sessionId,
+        input.title ?? null,
+        input.status ?? null,
+        input.lastTaskAt ?? null,
+        input.summary ?? null,
+        input.summaryMessageCount ?? null,
+        input.summaryUpdatedAt ?? null,
+      ],
     );
   }
 
+  // 读取 session 元数据，包括持久化摘要状态，供 Planner 判断是否需要增量总结。
   async getSession(sessionId: string): Promise<SessionRecord | null> {
     const result = await this.pool.query(
       `
-        select id, title, user_id, status, created_at, updated_at, last_task_at
+        select
+          id,
+          title,
+          user_id,
+          status,
+          summary,
+          summary_message_count,
+          created_at,
+          updated_at,
+          last_task_at,
+          summary_updated_at
         from sessions
         where id = $1
       `,
@@ -62,9 +87,12 @@ export class PostgresMemoryStore implements MemoryStore {
       title: row.title,
       userId: row.user_id,
       status: row.status,
+      summary: row.summary,
+      summaryMessageCount: row.summary_message_count,
       createdAt: row.created_at.toISOString(),
       updatedAt: row.updated_at.toISOString(),
       lastTaskAt: row.last_task_at ? row.last_task_at.toISOString() : null,
+      summaryUpdatedAt: row.summary_updated_at ? row.summary_updated_at.toISOString() : null,
     };
   }
 
@@ -164,6 +192,7 @@ export class PostgresMemoryStore implements MemoryStore {
     }));
   }
 
+  // 拉取某个 session 的完整消息时间线，用于构造“摘要 + 最近窗口”的上下文。
   async listAllSessionMessages(sessionId: string): Promise<SessionMemoryMessage[]> {
     const result = await this.pool.query(
       `

@@ -79,6 +79,12 @@ curl -X POST http://localhost:3000/agent/run \
 docker compose -f infra/postgres/compose.yaml up -d
 ```
 
+应用数据库迁移：
+
+```bash
+pnpm run db:migrate
+```
+
 运行评测：
 
 ```bash

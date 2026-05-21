@@ -16,6 +16,7 @@ export class PlannerAgent implements Agent {
     },
   ) {}
 
+  // 执行一次 agent 规划循环：模型决定是否用工具，工具结果再回到模型生成最终回答。
   async plan(request: AgentRequest, context: AgentContext): Promise<AgentResponse> {
     const sessionContext = request.sessionId
       ? await this.buildSessionContext(request, context)
@@ -185,13 +186,19 @@ export class PlannerAgent implements Agent {
     };
   }
 
+  // 组装喂给模型的会话上下文：旧内容走持久化摘要，最近内容保留原文。
   private async buildSessionContext(request: AgentRequest, context: AgentContext): Promise<{
     sessionSummary: string | null;
     recentHistory: LlmConversationMessage[];
   }> {
-    const allMessages = await context.memory.listAllSessionMessages(request.sessionId!);
-    const llmMessages = this.buildLlmConversationHistory(allMessages, request.taskId);
-    const recentHistory = llmMessages.slice(-this.options.sessionHistoryMessageLimit);
+    const sessionId = request.sessionId!;
+    const [session, allMessages] = await Promise.all([
+      context.memory.getSession(sessionId),
+      context.memory.listAllSessionMessages(sessionId),
+    ]);
+    const llmMessages = this.toLlmConversationMessages(allMessages, request.taskId);
+    // 最近窗口保留原文，较早历史交给 summary；这样追问细节和长会话成本能兼顾。
+    const recentHistory = this.applyCharBudget(llmMessages.slice(-this.options.sessionHistoryMessageLimit));
     const olderMessages = llmMessages.slice(0, Math.max(0, llmMessages.length - recentHistory.length));
 
     if (olderMessages.length === 0) {
@@ -201,9 +208,34 @@ export class PlannerAgent implements Agent {
       };
     }
 
+    const currentSummary = session?.summary ?? null;
+    const currentSummaryMessageCount = session?.summaryMessageCount ?? 0;
+    const hasReusableSummary = Boolean(currentSummary);
+    const summaryNeedsOnlyNewMessages = hasReusableSummary && currentSummaryMessageCount < olderMessages.length;
+
+    // summary_message_count 表示现有 summary 已覆盖的旧消息数，可避免每次从头总结整段会话。
+    if (currentSummary && currentSummaryMessageCount === olderMessages.length) {
+      return {
+        sessionSummary: currentSummary,
+        recentHistory,
+      };
+    }
+
+    // 如果已有 summary，只把它尚未覆盖的新旧消息拿去合并总结；否则首次总结全部旧消息。
+    const messagesToSummarize = summaryNeedsOnlyNewMessages
+      ? olderMessages.slice(currentSummaryMessageCount)
+      : olderMessages;
     const sessionSummary = await context.llm.summarizeSession({
-      messages: olderMessages,
+      // 只有增量更新时才传 existingSummary，避免把过期或不匹配的摘要混进首次总结。
+      existingSummary: summaryNeedsOnlyNewMessages ? currentSummary : null,
+      messages: this.applyCharBudget(messagesToSummarize, this.options.sessionHistoryCharBudget * 2),
       currentUserInput: request.input,
+    });
+
+    await context.memory.updateSession(sessionId, {
+      summary: sessionSummary,
+      summaryMessageCount: olderMessages.length,
+      summaryUpdatedAt: new Date().toISOString(),
     });
 
     return {
@@ -212,19 +244,33 @@ export class PlannerAgent implements Agent {
     };
   }
 
-  private buildLlmConversationHistory(
+  // 存储层会保留 system 等内部消息，这里只挑出适合进入模型上下文的角色。
+  private toLlmConversationMessages(
     conversationHistory: Awaited<ReturnType<AgentContext["memory"]["listSessionMessages"]>>,
     currentTaskId: string,
   ): LlmConversationMessage[] {
-    const filteredHistory = conversationHistory.filter(
-      (item): item is typeof item & { role: LlmConversationMessage["role"] } =>
-        item.taskId !== currentTaskId && (item.role === "user" || item.role === "assistant" || item.role === "tool"),
-    );
-    const result: LlmConversationMessage[] = [];
-    let remainingChars = this.options.sessionHistoryCharBudget;
+    return conversationHistory
+      .filter(
+        (item): item is typeof item & { role: LlmConversationMessage["role"] } =>
+          item.taskId !== currentTaskId && (item.role === "user" || item.role === "assistant" || item.role === "tool"),
+      )
+      .map((item) => ({
+        role: item.role,
+        content: item.content,
+      }));
+  }
 
-    for (let index = filteredHistory.length - 1; index >= 0; index -= 1) {
-      const item = filteredHistory[index];
+  // 给模型输入做字符预算控制，避免长会话把上下文无限撑大。
+  private applyCharBudget(
+    conversationHistory: LlmConversationMessage[],
+    charBudget = this.options.sessionHistoryCharBudget,
+  ): LlmConversationMessage[] {
+    const result: LlmConversationMessage[] = [];
+    let remainingChars = charBudget;
+
+    // 从最新消息往前保留，预算不足时优先牺牲更早的上下文。
+    for (let index = conversationHistory.length - 1; index >= 0; index -= 1) {
+      const item = conversationHistory[index];
 
       if (remainingChars <= 0) {
         break;

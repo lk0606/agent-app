@@ -13,7 +13,20 @@ async function main(): Promise<void> {
 
   await verifyPgConnection(pool);
 
-  const [tasks, messages, toolCalls] = await Promise.all([
+  const [sessions, tasks, messages, toolCalls] = await Promise.all([
+    pool.query(
+      `
+        select
+          id,
+          summary_message_count,
+          summary_updated_at,
+          left(coalesce(summary, ''), 240) as summary_preview,
+          created_at
+        from sessions
+        order by created_at desc
+        limit 5
+      `,
+    ),
     pool.query("select id, status, summary, created_at from tasks order by created_at desc limit 5"),
     pool.query("select task_id, role, created_at from messages order by created_at desc limit 10"),
     pool.query("select task_id, step, tool_name, status, created_at from tool_calls order by created_at desc limit 10"),
@@ -22,6 +35,7 @@ async function main(): Promise<void> {
   console.log(
     JSON.stringify(
       {
+        sessions: sessions.rows,
         tasks: tasks.rows,
         messages: messages.rows,
         toolCalls: toolCalls.rows,

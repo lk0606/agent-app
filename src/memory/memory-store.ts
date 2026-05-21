@@ -28,6 +28,9 @@ export interface UpdateSessionInput {
   title?: string | null;
   status?: SessionStatus;
   lastTaskAt?: string | null;
+  summary?: string | null;
+  summaryMessageCount?: number;
+  summaryUpdatedAt?: string | null;
 }
 
 export interface UpdateTaskInput {

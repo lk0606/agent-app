@@ -9,9 +9,12 @@ export interface SessionRecord {
   title: string | null;
   userId: string | null;
   status: SessionStatus;
+  summary: string | null;
+  summaryMessageCount: number;
   createdAt: string;
   updatedAt: string;
   lastTaskAt: string | null;
+  summaryUpdatedAt: string | null;
 }
 
 export interface TaskRecord {

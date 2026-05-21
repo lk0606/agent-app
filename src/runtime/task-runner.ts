@@ -16,6 +16,7 @@ export interface TaskRunnerDeps {
 export class TaskRunner {
   constructor(private readonly deps: TaskRunnerDeps) {}
 
+  // 托管一次任务的生命周期：建任务、写用户消息、运行 agent、落最终状态。
   async run(request: AgentRequest): Promise<AgentResponse> {
     const logger = this.deps.logger.child({ taskId: request.taskId });
 

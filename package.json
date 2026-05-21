@@ -11,6 +11,7 @@
     "build": "tsc -p tsconfig.json",
     "db:check": "tsx src/scripts/check-postgres.ts",
     "db:inspect": "tsx src/scripts/inspect-postgres.ts",
+    "db:migrate": "tsx src/scripts/migrate-postgres.ts",
     "evals:run": "tsx src/scripts/run-evals.ts",
     "start": "node dist/index.js",
     "start:server": "node dist/server.js",

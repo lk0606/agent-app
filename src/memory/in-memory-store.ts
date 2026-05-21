@@ -19,9 +19,12 @@ export class InMemoryStore implements MemoryStore {
       title: input.title ?? null,
       userId: input.userId ?? null,
       status: input.status ?? "active",
+      summary: null,
+      summaryMessageCount: 0,
       createdAt: now,
       updatedAt: now,
       lastTaskAt: null,
+      summaryUpdatedAt: null,
     });
   }
 
@@ -31,6 +34,9 @@ export class InMemoryStore implements MemoryStore {
       title?: string | null;
       status?: SessionRecord["status"];
       lastTaskAt?: string | null;
+      summary?: string | null;
+      summaryMessageCount?: number;
+      summaryUpdatedAt?: string | null;
     },
   ): Promise<void> {
     const current = this.sessions.get(sessionId);
@@ -44,6 +50,9 @@ export class InMemoryStore implements MemoryStore {
       title: input.title ?? current.title,
       status: input.status ?? current.status,
       lastTaskAt: input.lastTaskAt ?? current.lastTaskAt,
+      summary: input.summary ?? current.summary,
+      summaryMessageCount: input.summaryMessageCount ?? current.summaryMessageCount,
+      summaryUpdatedAt: input.summaryUpdatedAt ?? current.summaryUpdatedAt,
       updatedAt: new Date().toISOString(),
     });
   }

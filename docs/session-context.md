@@ -2,9 +2,9 @@
 
 这是“会话系统与用户上下文”阶段的下一步：让 session 历史不仅能被模型使用，还能被稳定地控制。
 
-当前项目采用的是“摘要 + 窗口”的上下文注入：
+当前项目采用的是“持久化摘要 + 窗口”的上下文注入：
 
-- 较早历史先总结成一段 session summary
+- 较早历史先总结成一段 session summary，并写回 `sessions`
 - 最近 N 条消息保留为 recent window
 - recent window 再按总字符预算裁剪
 - 只把 `user`、`assistant`、`tool` 三类消息喂给模型
@@ -89,18 +89,36 @@ SESSION_HISTORY_CHAR_BUDGET=4000
    - older messages
    - recent window
 4. 如果 older messages 不为空：
-   - 调一次模型，生成 session summary
+   - 优先复用 `sessions.summary`
+   - 如果有新消息进入 older messages，只增量更新 summary
 5. 最终模型输入：
    - `session summary`
    - `recent window`
    - 当前用户输入
 
+## 数据库字段
+
+`sessions` 表里新增了三列：
+
+- `summary`：较早历史的压缩摘要
+- `summary_message_count`：当前 summary 已经覆盖的历史消息数量
+- `summary_updated_at`：summary 最近更新时间
+
+已有数据库需要执行：
+
+```bash
+pnpm run db:migrate
+```
+
+新建数据库会在 Docker 初始化时自动执行 `infra/postgres/init/003_session_summary.sql`。
+
 ## 下一步该怎么演进
 
-这个阶段完成后，下一步推荐做“持久化 session summary”：
+这个阶段完成后，下一步推荐做“会话详情 API”：
 
-- 把运行时 summary 落到数据库
-- 只在历史发生明显增长时增量更新 summary
-- 减少每次请求多做一次摘要调用的成本
+- 查询 session 列表
+- 查询单个 session 的消息时间线
+- 查询 session summary
+- 支持归档 session
 
-这样就能从“长会话可用”进化到“长会话更省成本”。 
+这样前端就能真正展示和管理多轮会话。

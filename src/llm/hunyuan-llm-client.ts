@@ -13,6 +13,7 @@ export class HunyuanLlmClient implements LlmClient {
     });
   }
 
+  // 规划阶段只回答“是否需要工具、用哪个工具、输入是什么”，不直接执行业务逻辑。
   async plan(input: PlanRequest): Promise<PlannerDecision> {
     try {
       const completion = await this.client.chat.completions.create({
@@ -79,6 +80,7 @@ export class HunyuanLlmClient implements LlmClient {
     }
   }
 
+  // 工具执行后再让模型组织自然语言，避免把原始工具输出直接暴露给用户。
   async answerWithTool(input: AnswerRequest): Promise<string> {
     try {
       const completion = await this.client.chat.completions.create({
@@ -112,6 +114,7 @@ export class HunyuanLlmClient implements LlmClient {
     }
   }
 
+  // 将旧会话压缩成稳定摘要，后续请求可复用，降低长会话的 token 和延迟成本。
   async summarizeSession(input: SessionSummaryRequest): Promise<string> {
     try {
       const completion = await this.client.chat.completions.create({
@@ -121,6 +124,7 @@ export class HunyuanLlmClient implements LlmClient {
             role: "system",
             content: [
               "You summarize earlier conversation history for a Node agent.",
+              "If an existing summary is provided, merge the new messages into it.",
               "Keep only stable user facts, prior decisions, and important tool findings.",
               "Be concise. Prefer 3 to 6 short bullet-like lines in plain text.",
               "Omit chit-chat and low-value repetition.",
@@ -128,8 +132,10 @@ export class HunyuanLlmClient implements LlmClient {
           },
           {
             role: "user",
+            // existingSummary 是已压缩的旧历史，后面的 messages 只放新增旧消息，控制摘要调用成本。
             content: [
               `Current user input: ${input.currentUserInput}`,
+              `Existing session summary:\n${input.existingSummary?.trim() || "No existing summary."}`,
               "Earlier session history to summarize:",
               input.messages.map((item, index) => `[${index + 1}] ${item.role}: ${item.content}`).join("\n"),
             ].join("\n\n"),
@@ -144,6 +150,7 @@ export class HunyuanLlmClient implements LlmClient {
     }
   }
 
+  // Function calling 的 arguments 是字符串，解析失败时回退到空对象让上层用默认输入兜底。
   private parseToolArguments(argumentsText: string): { input?: string } {
     try {
       const parsed = JSON.parse(argumentsText) as { input?: unknown };
@@ -153,6 +160,7 @@ export class HunyuanLlmClient implements LlmClient {
     }
   }
 
+  // 兼容普通文本和部分兼容接口返回的 content parts。
   private readMessageContent(content: string | Array<{ type?: string; text?: string }> | null | undefined): string {
     if (typeof content === "string" && content.length > 0) {
       return content;
@@ -171,8 +179,10 @@ export class HunyuanLlmClient implements LlmClient {
     return "The model returned an empty response.";
   }
 
+  // 把结构化规划输入整理成单段 prompt，便于兼容混元的 OpenAI chat completions 接口。
   private buildPlannerInput(input: PlanRequest): string {
     const tools = input.tools.map((tool) => `- ${tool.name}: ${tool.description}`).join("\n");
+    // previousToolCalls 是本次任务内已经执行过的工具结果，帮助模型避免重复调用同一个工具。
     const history =
       input.previousToolCalls.length === 0
         ? "No previous tool results."
@@ -191,6 +201,7 @@ export class HunyuanLlmClient implements LlmClient {
     ].join("\n\n");
   }
 
+  // 最终传给模型的是“较早摘要 + 最近原文”，两者缺一时也保持固定格式。
   private buildConversationHistory(
     history: PlanRequest["conversationHistory"] | AnswerRequest["conversationHistory"],
     sessionSummary?: string | null,
@@ -202,6 +213,7 @@ export class HunyuanLlmClient implements LlmClient {
     }
 
     if (history.length === 0) {
+      // 固定输出这个段落，让 planner/answer prompt 结构稳定，减少模型误判“缺了历史字段”。
       sections.push("Conversation history:\nNo recent session messages.");
       return sections.join("\n\n");
     }

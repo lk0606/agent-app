@@ -38,6 +38,7 @@ export interface AnswerRequest {
 }
 
 export interface SessionSummaryRequest {
+  existingSummary?: string | null;
   messages: Array<{
     role: "user" | "assistant" | "tool";
     content: string;
