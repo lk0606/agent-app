@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 
-import type { SessionRecord, TaskRecord } from "./persistence-model.js";
+import type { SessionRecord, SessionStatus, TaskRecord, ToolCallRecord } from "./persistence-model.js";
 import type {
   CreateSessionInput,
   CreateTaskInput,
@@ -11,6 +11,50 @@ import type {
   UpdateSessionInput,
   UpdateTaskInput,
 } from "./memory-store.js";
+
+type DbTimestamp = {
+  toISOString(): string;
+};
+
+type SessionRow = {
+  id: string;
+  title: string | null;
+  user_id: string | null;
+  status: SessionRecord["status"];
+  summary: string | null;
+  summary_message_count: number;
+  created_at: DbTimestamp;
+  updated_at: DbTimestamp;
+  last_task_at: DbTimestamp | null;
+  summary_updated_at: DbTimestamp | null;
+};
+
+type TaskRow = {
+  id: string;
+  session_id: string | null;
+  input: string;
+  status: TaskRecord["status"];
+  summary: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  created_at: DbTimestamp;
+  updated_at: DbTimestamp;
+  finished_at: DbTimestamp | null;
+};
+``
+type ToolCallRow = {
+  id: string;
+  task_id: string;
+  step: number;
+  tool_name: string;
+  tool_input: string;
+  tool_output: string | null;
+  status: ToolCallRecord["status"];
+  error_code: string | null;
+  error_message: string | null;
+  created_at: DbTimestamp;
+  finished_at: DbTimestamp | null;
+};
 
 export class PostgresMemoryStore implements MemoryStore {
   constructor(private readonly pool: Pool) {}
@@ -57,7 +101,7 @@ export class PostgresMemoryStore implements MemoryStore {
 
   // 读取 session 元数据，包括持久化摘要状态，供 Planner 判断是否需要增量总结。
   async getSession(sessionId: string): Promise<SessionRecord | null> {
-    const result = await this.pool.query(
+    const result = await this.pool.query<SessionRow>(
       `
         select
           id,
@@ -82,18 +126,32 @@ export class PostgresMemoryStore implements MemoryStore {
       return null;
     }
 
-    return {
-      id: row.id,
-      title: row.title,
-      userId: row.user_id,
-      status: row.status,
-      summary: row.summary,
-      summaryMessageCount: row.summary_message_count,
-      createdAt: row.created_at.toISOString(),
-      updatedAt: row.updated_at.toISOString(),
-      lastTaskAt: row.last_task_at ? row.last_task_at.toISOString() : null,
-      summaryUpdatedAt: row.summary_updated_at ? row.summary_updated_at.toISOString() : null,
-    };
+    return this.toSessionRecord(row);
+  }
+
+  async listSessions(input: { status?: SessionStatus; limit?: number } = {}): Promise<SessionRecord[]> {
+    const result = await this.pool.query<SessionRow>(
+      `
+        select
+          id,
+          title,
+          user_id,
+          status,
+          summary,
+          summary_message_count,
+          created_at,
+          updated_at,
+          last_task_at,
+          summary_updated_at
+        from sessions
+        where ($1::text is null or status = $1)
+        order by coalesce(last_task_at, created_at) desc, created_at desc
+        limit $2
+      `,
+      [input.status ?? null, input.limit ?? 50],
+    );
+
+    return result.rows.map((row) => this.toSessionRecord(row));
   }
 
   async createTask(input: CreateTaskInput): Promise<void> {
@@ -125,7 +183,7 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   async getTask(taskId: string): Promise<TaskRecord | null> {
-    const result = await this.pool.query(
+    const result = await this.pool.query<TaskRow>(
       `
         select
           id,
@@ -150,18 +208,31 @@ export class PostgresMemoryStore implements MemoryStore {
       return null;
     }
 
-    return {
-      id: row.id,
-      sessionId: row.session_id,
-      input: row.input,
-      status: row.status,
-      summary: row.summary,
-      errorCode: row.error_code,
-      errorMessage: row.error_message,
-      createdAt: row.created_at.toISOString(),
-      updatedAt: row.updated_at.toISOString(),
-      finishedAt: row.finished_at ? row.finished_at.toISOString() : null,
-    };
+    return this.toTaskRecord(row);
+  }
+
+  async listSessionTasks(sessionId: string): Promise<TaskRecord[]> {
+    const result = await this.pool.query<TaskRow>(
+      `
+        select
+          id,
+          session_id,
+          input,
+          status,
+          summary,
+          error_code,
+          error_message,
+          created_at,
+          updated_at,
+          finished_at
+        from tasks
+        where session_id = $1
+        order by created_at asc, id asc
+      `,
+      [sessionId],
+    );
+
+    return result.rows.map((row) => this.toTaskRecord(row));
   }
 
   async append(taskId: string, message: MemoryMessage): Promise<void> {
@@ -252,5 +323,72 @@ export class PostgresMemoryStore implements MemoryStore {
         input.finishedAt ?? null,
       ],
     );
+  }
+
+  async listTaskToolCalls(taskId: string): Promise<ToolCallRecord[]> {
+    const result = await this.pool.query<ToolCallRow>(
+      `
+        select
+          id,
+          task_id,
+          step,
+          tool_name,
+          tool_input,
+          tool_output,
+          status,
+          error_code,
+          error_message,
+          created_at,
+          finished_at
+        from tool_calls
+        where task_id = $1
+        order by step asc, id asc
+      `,
+      [taskId],
+    );
+
+    return result.rows.map((row) => ({
+      id: row.id,
+      taskId: row.task_id,
+      step: row.step,
+      toolName: row.tool_name,
+      toolInput: row.tool_input,
+      toolOutput: row.tool_output,
+      status: row.status,
+      errorCode: row.error_code,
+      errorMessage: row.error_message,
+      createdAt: row.created_at.toISOString(),
+      finishedAt: row.finished_at ? row.finished_at.toISOString() : null,
+    }));
+  }
+
+  private toSessionRecord(row: SessionRow): SessionRecord {
+    return {
+      id: row.id,
+      title: row.title,
+      userId: row.user_id,
+      status: row.status,
+      summary: row.summary,
+      summaryMessageCount: row.summary_message_count,
+      createdAt: row.created_at.toISOString(),
+      updatedAt: row.updated_at.toISOString(),
+      lastTaskAt: row.last_task_at ? row.last_task_at.toISOString() : null,
+      summaryUpdatedAt: row.summary_updated_at ? row.summary_updated_at.toISOString() : null,
+    };
+  }
+
+  private toTaskRecord(row: TaskRow): TaskRecord {
+    return {
+      id: row.id,
+      sessionId: row.session_id,
+      input: row.input,
+      status: row.status,
+      summary: row.summary,
+      errorCode: row.error_code,
+      errorMessage: row.error_message,
+      createdAt: row.created_at.toISOString(),
+      updatedAt: row.updated_at.toISOString(),
+      finishedAt: row.finished_at ? row.finished_at.toISOString() : null,
+    };
   }
 }

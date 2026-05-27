@@ -5,6 +5,7 @@ export type ErrorCode =
   | "TOOL_ERROR"
   | "LLM_ERROR"
   | "BAD_REQUEST"
+  | "NOT_FOUND"
   | "INTERNAL_ERROR";
 
 export class AppError extends Error {

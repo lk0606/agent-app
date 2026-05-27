@@ -1,4 +1,11 @@
-import type { SessionRecord, SessionStatus, TaskRecord, TaskStatus, ToolCallStatus } from "./persistence-model.js";
+import type {
+  SessionRecord,
+  SessionStatus,
+  TaskRecord,
+  TaskStatus,
+  ToolCallRecord,
+  ToolCallStatus,
+} from "./persistence-model.js";
 
 export interface MemoryMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -58,12 +65,15 @@ export interface MemoryStore {
   createSession(input: CreateSessionInput): Promise<void>;
   updateSession(sessionId: string, input: UpdateSessionInput): Promise<void>;
   getSession(sessionId: string): Promise<SessionRecord | null>;
+  listSessions(input?: { status?: SessionStatus; limit?: number }): Promise<SessionRecord[]>;
   createTask(input: CreateTaskInput): Promise<void>;
   updateTask(taskId: string, input: UpdateTaskInput): Promise<void>;
   getTask(taskId: string): Promise<TaskRecord | null>;
+  listSessionTasks(sessionId: string): Promise<TaskRecord[]>;
   append(taskId: string, message: MemoryMessage): Promise<void>;
   list(taskId: string): Promise<MemoryMessage[]>;
   listAllSessionMessages(sessionId: string): Promise<SessionMemoryMessage[]>;
   listSessionMessages(sessionId: string, limit: number): Promise<SessionMemoryMessage[]>;
   recordToolCall(input: RecordToolCallInput): Promise<void>;
+  listTaskToolCalls(taskId: string): Promise<ToolCallRecord[]>;
 }

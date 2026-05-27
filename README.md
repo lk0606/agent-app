@@ -14,6 +14,7 @@
 - `docs/persistence-model.md`：持久化模型设计
 - `docs/postgres-setup.md`：本地 PostgreSQL 启动说明
 - `docs/evals-and-replay.md`：评测与回放说明
+- `docs/http-api.md`：后端 HTTP API 说明
 - `docs/time-handling.md`：时间存储与前端展示规范
 - `docs/session-context.md`：会话上下文窗口策略
 - `docs/fullstack-frontend-plan.md`：前后端协同与 Next.js 前端规划

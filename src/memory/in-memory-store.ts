@@ -61,6 +61,17 @@ export class InMemoryStore implements MemoryStore {
     return this.sessions.get(sessionId) ?? null;
   }
 
+  async listSessions(input: { status?: SessionRecord["status"]; limit?: number } = {}): Promise<SessionRecord[]> {
+    return [...this.sessions.values()]
+      .filter((session) => (input.status ? session.status === input.status : true))
+      .sort((left, right) => {
+        const leftTime = left.lastTaskAt ?? left.createdAt;
+        const rightTime = right.lastTaskAt ?? right.createdAt;
+        return rightTime.localeCompare(leftTime);
+      })
+      .slice(0, input.limit ?? 50);
+  }
+
   async createTask(input: {
     id: string;
     sessionId?: string | null;
@@ -111,6 +122,12 @@ export class InMemoryStore implements MemoryStore {
 
   async getTask(taskId: string): Promise<TaskRecord | null> {
     return this.tasks.get(taskId) ?? null;
+  }
+
+  async listSessionTasks(sessionId: string): Promise<TaskRecord[]> {
+    return [...this.tasks.values()]
+      .filter((task) => task.sessionId === sessionId)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
   async append(taskId: string, message: MemoryMessage): Promise<void> {
@@ -176,5 +193,9 @@ export class InMemoryStore implements MemoryStore {
     });
 
     this.toolCalls.set(input.taskId, rows);
+  }
+
+  async listTaskToolCalls(taskId: string): Promise<ToolCallRecord[]> {
+    return [...(this.toolCalls.get(taskId) ?? [])].sort((left, right) => left.step - right.step);
   }
 }
