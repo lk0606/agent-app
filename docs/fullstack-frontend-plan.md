@@ -16,6 +16,7 @@
 - 会话系统：同一个 `sessionId` 可以复用上下文
 - 会话记忆：`summary + recent window`
 - 持久化 session summary：`summary`、`summary_message_count`、`summary_updated_at`
+- 共享 API contract：`packages/api-contract`
 - 评测与回放：`evals:run`、`task:replay`
 - HTTP API：当前核心入口是 `POST /agent/run`
 
@@ -457,6 +458,10 @@ export default async function LocaleLayout({ children, params }) {
 
 - 前后端类型不再手写两份
 - API 改字段时 TypeScript 能提醒前端同步改
+
+状态：
+
+- 已完成第一版，详见 `docs/api-contract.md`
 
 ### Step 4：Agent 调试面板
 

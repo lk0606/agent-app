@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "dev:server": "tsx src/server.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "pnpm --filter @agent-app/api-contract build && tsc -p tsconfig.json",
     "db:check": "tsx src/scripts/check-postgres.ts",
     "db:inspect": "tsx src/scripts/inspect-postgres.ts",
     "db:migrate": "tsx src/scripts/migrate-postgres.ts",
@@ -16,12 +16,13 @@
     "start": "node dist/index.js",
     "start:server": "node dist/server.js",
     "task:replay": "tsx src/scripts/replay-task.ts",
-    "check": "tsc --noEmit -p tsconfig.json"
+    "check": "pnpm --filter @agent-app/api-contract build && tsc --noEmit -p tsconfig.json"
   },
   "engines": {
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@agent-app/api-contract": "workspace:*",
     "dotenv": "^17.2.3",
     "openai": "^6.3.0",
     "pg": "^8.20.0"

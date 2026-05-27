@@ -1,12 +1,14 @@
 import "dotenv/config";
 
+import { ListSessionsQuerySchema, RunAgentRequestSchema } from "@agent-app/api-contract";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 
 import { createAgentRuntime } from "./app/create-agent-runtime.js";
 import { loadConfig } from "./config/env.js";
-import { getPathSegments, parsePositiveInt, readJsonBody } from "./http/http-request.js";
+import { getPathSegments, readJsonBody } from "./http/http-request.js";
 import { HTTP_STATUS, statusForError, writeJson } from "./http/http-response.js";
+import { parseSchema } from "./http/validation.js";
 import { AppError, classifyError } from "./shared/app-error.js";
 
 async function main(): Promise<void> {
@@ -30,14 +32,8 @@ async function main(): Promise<void> {
 
       if (req.method === "POST" && requestUrl.pathname === "/agent/run") {
         const body = await readJsonBody(req);
-        const input = typeof body.input === "string" ? body.input.trim() : "";
-
-        if (!input) {
-          throw new AppError("BAD_REQUEST", "Request body must contain a non-empty input string.");
-        }
-
-        let sessionId =
-          typeof body.sessionId === "string" && body.sessionId.trim().length > 0 ? body.sessionId.trim() : null;
+        const agentRequest = parseSchema(RunAgentRequestSchema, body, "Request body");
+        let sessionId = agentRequest.sessionId ?? null;
 
         if (!sessionId) {
           sessionId = randomUUID();
@@ -54,21 +50,20 @@ async function main(): Promise<void> {
           }
         }
 
-        const taskId = typeof body.taskId === "string" && body.taskId.length > 0 ? body.taskId : randomUUID();
-        const result = await runner.run({ taskId, sessionId, input });
+        const taskId = agentRequest.taskId ?? randomUUID();
+        const result = await runner.run({ taskId, sessionId, input: agentRequest.input });
 
         writeJson(res, HTTP_STATUS.ok, { sessionId, taskId, result });
         return;
       }
 
       if (req.method === "GET" && requestUrl.pathname === "/sessions") {
-        const status = parseSessionStatus(requestUrl.searchParams.get("status"));
-        const limit = parsePositiveInt(requestUrl.searchParams.get("limit"), {
-          fallback: 50,
-          max: 100,
-          name: "limit",
-        });
-        const sessions = await memory.listSessions({ status, limit });
+        const query = parseSchema(
+          ListSessionsQuerySchema,
+          Object.fromEntries(requestUrl.searchParams),
+          "Query parameters",
+        );
+        const sessions = await memory.listSessions(query);
 
         writeJson(res, HTTP_STATUS.ok, { sessions });
         return;
@@ -170,18 +165,6 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => {
     void shutdown();
   });
-}
-
-function parseSessionStatus(value: string | null): "active" | "archived" | undefined {
-  if (!value) {
-    return undefined;
-  }
-
-  if (value === "active" || value === "archived") {
-    return value;
-  }
-
-  throw new AppError("BAD_REQUEST", 'Query parameter "status" must be "active" or "archived".');
 }
 
 main().catch((error: unknown) => {

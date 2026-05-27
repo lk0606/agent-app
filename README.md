@@ -15,6 +15,7 @@
 - `docs/postgres-setup.md`：本地 PostgreSQL 启动说明
 - `docs/evals-and-replay.md`：评测与回放说明
 - `docs/http-api.md`：后端 HTTP API 说明
+- `docs/api-contract.md`：前后端共享 API 契约说明
 - `docs/time-handling.md`：时间存储与前端展示规范
 - `docs/session-context.md`：会话上下文窗口策略
 - `docs/fullstack-frontend-plan.md`：前后端协同与 Next.js 前端规划
