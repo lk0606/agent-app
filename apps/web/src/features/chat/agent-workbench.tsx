@@ -15,17 +15,18 @@ import {
   Zap,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { type FormEvent, type KeyboardEvent, type ReactNode, useState } from "react";
+import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { runAgent } from "@/lib/api/agent-api";
 
-type MessageStatus = "sending" | "sent" | "failed";
+type MessageStatus = "sending" | "sent" | "failed" | "thinking";
 
 type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  replyToMessageId?: string;
   status?: MessageStatus;
   error?: string;
   toolCalls?: AgentToolCall[];
@@ -39,6 +40,11 @@ export function AgentWorkbench() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+  }, [messages]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -67,14 +73,20 @@ export function AgentWorkbench() {
 
   async function sendMessage(content: string, existingMessageId?: string) {
     const messageId = existingMessageId ?? crypto.randomUUID();
+    const assistantMessageId = `${messageId}-assistant`;
 
     setMessages((current) => {
       if (existingMessageId) {
-        return current.map((message) =>
-          message.id === existingMessageId
-            ? { ...message, error: undefined, status: "sending" }
-            : message,
-        );
+        return [
+          ...current
+            .filter((message) => message.replyToMessageId !== existingMessageId)
+            .map((message) =>
+              message.id === existingMessageId
+                ? { ...message, error: undefined, status: "sending" as const }
+                : message,
+            ),
+          createThinkingMessage(assistantMessageId, existingMessageId, t("status.thinking")),
+        ];
       }
 
       return [
@@ -85,6 +97,7 @@ export function AgentWorkbench() {
           content,
           status: "sending",
         },
+        createThinkingMessage(assistantMessageId, messageId, t("status.thinking")),
       ];
     });
     setIsRunning(true);
@@ -97,30 +110,40 @@ export function AgentWorkbench() {
 
       setSessionId(response.sessionId);
       setTaskId(response.taskId);
-      setMessages((current) => [
-        ...current.map((message) =>
-          message.id === messageId ? { ...message, error: undefined, status: "sent" as const } : message,
-        ),
-        {
-          id: response.taskId,
-          role: "assistant",
-          content: response.result.summary,
-          toolCalls: response.result.toolCalls,
-        },
-      ]);
+      setMessages((current) =>
+        current.map((message) => {
+          if (message.id === messageId) {
+            return { ...message, error: undefined, status: "sent" as const };
+          }
+
+          if (message.id === assistantMessageId) {
+            return {
+              ...message,
+              id: response.taskId,
+              content: response.result.summary,
+              status: "sent" as const,
+              toolCalls: response.result.toolCalls,
+            };
+          }
+
+          return message;
+        }),
+      );
     } catch (requestError) {
       const message = formatRequestError(requestError);
 
       setMessages((current) =>
-        current.map((chatMessage) =>
-          chatMessage.id === messageId
-            ? {
-                ...chatMessage,
-                error: message,
-                status: "failed",
-              }
-            : chatMessage,
-        ),
+        current
+          .filter((chatMessage) => chatMessage.id !== assistantMessageId)
+          .map((chatMessage) =>
+            chatMessage.id === messageId
+              ? {
+                  ...chatMessage,
+                  error: message,
+                  status: "failed",
+                }
+              : chatMessage,
+          ),
       );
     } finally {
       setIsRunning(false);
@@ -210,11 +233,13 @@ export function AgentWorkbench() {
                       message={message}
                       retryLabel={t("composer.retry")}
                       sendingLabel={t("status.sending")}
+                      thinkingLabel={t("status.thinking")}
                       onRetry={(failedMessage) => {
                         void sendMessage(failedMessage.content, failedMessage.id);
                       }}
                     />
                   ))}
+                  <div ref={messagesEndRef} />
                 </div>
               )}
             </div>
@@ -291,17 +316,20 @@ function MessageRow({
   message,
   retryLabel,
   sendingLabel,
+  thinkingLabel,
   onRetry,
 }: {
   isRunning: boolean;
   message: ChatMessage;
   retryLabel: string;
   sendingLabel: string;
+  thinkingLabel: string;
   onRetry: (message: ChatMessage) => void;
 }) {
   const isUser = message.role === "user";
   const isFailed = message.status === "failed";
   const isSending = message.status === "sending";
+  const isThinking = message.status === "thinking";
 
   return (
     <article className={`flex items-start gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
@@ -334,6 +362,12 @@ function MessageRow({
               <span>{sendingLabel}</span>
             </div>
           ) : null}
+          {isThinking ? (
+            <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
+              <span>{thinkingLabel}</span>
+            </div>
+          ) : null}
           {isFailed ? (
             <div className="mt-3 rounded-xl border border-danger/25 bg-background/65 p-3 text-danger">
               <p className="text-xs leading-5">{message.error}</p>
@@ -354,6 +388,16 @@ function MessageRow({
       {isUser ? <Avatar icon={<User className="h-4 w-4" />} tone="user" /> : null}
     </article>
   );
+}
+
+function createThinkingMessage(id: string, replyToMessageId: string, content: string): ChatMessage {
+  return {
+    id,
+    role: "assistant",
+    content,
+    replyToMessageId,
+    status: "thinking",
+  };
 }
 
 function Avatar({ icon, tone }: { icon: ReactNode; tone: "assistant" | "user" }) {

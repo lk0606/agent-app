@@ -68,6 +68,10 @@ export const chatMessages = {
       "zh-CN": "发送中",
       "en-US": "Sending",
     },
+    thinking: {
+      "zh-CN": "AI 正在思考...",
+      "en-US": "AI is thinking...",
+    },
     needsRetry: {
       "zh-CN": "待重发",
       "en-US": "Needs retry",
