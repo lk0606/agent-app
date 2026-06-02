@@ -18,15 +18,12 @@
 - 持久化 session summary：`summary`、`summary_message_count`、`summary_updated_at`
 - 共享 API contract：`packages/api-contract`
 - 评测与回放：`evals:run`、`task:replay`
-- HTTP API：当前核心入口是 `POST /agent/run`
+- HTTP API：`POST /agent/run`、`GET /sessions`、`GET /sessions/:sessionId`、`GET /sessions/:sessionId/messages`、`GET /tasks/:taskId`、`PATCH /sessions/:sessionId/archive`
 
-当前后端下一步：
+当前后端后续：
 
-- 增加会话详情 API
-- 查询 session 列表
-- 查询单个 session 的消息时间线
-- 查询 session summary
-- 支持归档 session
+- 增加 streaming endpoint，让前端可以展示模型生成中、工具调用中、工具完成等实时状态
+- 增加更完整的 task trace，方便前端调试面板还原每一步决策
 
 ## 2. 是否前后端放一个仓库
 
@@ -434,6 +431,11 @@ export default async function LocaleLayout({ children, params }) {
 - 能复用 `sessionId` 连续追问
 - 能展示 toolCalls
 
+状态：
+
+- 已完成最小版本，详见 `docs/web-setup.md`
+- 当前先用 Tailwind + 业务组件跑通闭环，`shadcn/ui` 等基础组件复用需求稳定后再引入
+
 ### Step 2：后端补会话查询 API
 
 - `GET /sessions`
@@ -446,6 +448,11 @@ export default async function LocaleLayout({ children, params }) {
 - 前端左侧能展示 session 列表
 - 点击 session 能恢复消息时间线
 - 能看到 summary preview
+
+状态：
+
+- 后端接口已完成
+- 前端尚未接入，会作为下一步 Web 任务
 
 ### Step 3：共享 API contract
 

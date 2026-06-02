@@ -19,6 +19,7 @@
 - `docs/time-handling.md`：时间存储与前端展示规范
 - `docs/session-context.md`：会话上下文窗口策略
 - `docs/fullstack-frontend-plan.md`：前后端协同与 Next.js 前端规划
+- `docs/web-setup.md`：Next.js 前端启动与测试说明
 - `src/`：Agent 应用骨架代码
 
 ## 当前脚手架能力
@@ -28,7 +29,8 @@
 - `MemoryStore` 抽象与内存版实现
 - `TaskRunner` 运行时
 - `HunyuanLlmClient` 实现，通过 OpenAI SDK 接腾讯混元兼容接口
-- 最小 HTTP API：`POST /agent/run`
+- HTTP API：Agent 运行、会话列表、会话详情、消息时间线、任务详情
+- Next.js 前端工作台：最小 chat 页面、主题切换、国际化路由、调试面板
 
 ## 快速开始
 
@@ -67,6 +69,14 @@ PORT=3000
 ```bash
 pnpm run dev:server
 ```
+
+启动 Next.js 前端：
+
+```bash
+pnpm run dev:web
+```
+
+前端默认运行在 `http://localhost:3001/zh-CN`，后端默认运行在 `http://localhost:3000`。
 
 调用示例：
 

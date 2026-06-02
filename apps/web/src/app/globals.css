@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #f4f7ef;
+  --foreground: #17211c;
+  --panel: #fffdf6;
+  --sidebar: #e8eee4;
+  --muted: #dfe9de;
+  --muted-foreground: #607069;
+  --border: #cad8cf;
+  --accent: #0f766e;
+  --accent-soft: #d7f1ea;
+  --accent-foreground: #f7fffc;
+  --danger: #b42318;
+  --danger-soft: #fee4dd;
+}
+
+.dark {
+  --background: #101714;
+  --foreground: #edf3ed;
+  --panel: #18221e;
+  --sidebar: #141d19;
+  --muted: #25322d;
+  --muted-foreground: #9aa89d;
+  --border: #2f3a33;
+  --accent: #72c8bd;
+  --accent-soft: #173935;
+  --accent-foreground: #08211e;
+  --danger: #ff9b86;
+  --danger-soft: #3b1f1a;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-panel: var(--panel);
+  --color-sidebar: var(--sidebar);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --font-sans: "IBM Plex Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", "Cascadia Code", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+  background: var(--background);
+}
+
+body {
+  height: 100%;
+  margin: 0;
+  background:
+    radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 24rem),
+    radial-gradient(circle at 80% 0%, color-mix(in srgb, #e58f5a 18%, transparent), transparent 26rem),
+    linear-gradient(135deg, color-mix(in srgb, var(--background) 82%, white), var(--background)),
+    var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
