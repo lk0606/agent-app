@@ -6,11 +6,13 @@ settings:
 
 importers:
 
-  .:
+  .: {}
+
+  apps/api:
     dependencies:
       '@agent-app/api-contract':
         specifier: workspace:*
-        version: link:packages/api-contract
+        version: link:../../packages/api-contract
       dotenv:
         specifier: ^17.2.3
         version: 17.4.1

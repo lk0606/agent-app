@@ -6,36 +6,24 @@
   "packageManager": "pnpm@10.31.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx src/index.ts",
-    "dev:server": "tsx src/server.ts",
+    "dev": "pnpm --filter @agent-app/api dev",
+    "dev:server": "pnpm --filter @agent-app/api dev:server",
     "dev:web": "pnpm --filter @agent-app/web exec next dev --port 3001",
-    "build": "pnpm --filter @agent-app/api-contract build && tsc -p tsconfig.json",
+    "build": "pnpm --filter @agent-app/api build",
     "build:web": "pnpm --filter @agent-app/web build",
     "build:all": "pnpm run build && pnpm run build:web",
-    "db:check": "tsx src/scripts/check-postgres.ts",
-    "db:inspect": "tsx src/scripts/inspect-postgres.ts",
-    "db:migrate": "tsx src/scripts/migrate-postgres.ts",
-    "evals:run": "tsx src/scripts/run-evals.ts",
-    "start": "node dist/index.js",
-    "start:server": "node dist/server.js",
-    "task:replay": "tsx src/scripts/replay-task.ts",
-    "check": "pnpm --filter @agent-app/api-contract build && tsc --noEmit -p tsconfig.json",
+    "db:check": "pnpm --filter @agent-app/api db:check",
+    "db:inspect": "pnpm --filter @agent-app/api db:inspect",
+    "db:migrate": "pnpm --filter @agent-app/api db:migrate",
+    "evals:run": "pnpm --filter @agent-app/api evals:run",
+    "start": "pnpm --filter @agent-app/api start",
+    "start:server": "pnpm --filter @agent-app/api start:server",
+    "task:replay": "pnpm --filter @agent-app/api task:replay",
+    "check": "pnpm --filter @agent-app/api check",
     "check:web": "pnpm --filter @agent-app/web lint && pnpm run build:web",
     "check:all": "pnpm run check && pnpm run check:web"
   },
   "engines": {
     "node": ">=20.0.0"
-  },
-  "dependencies": {
-    "@agent-app/api-contract": "workspace:*",
-    "dotenv": "^17.2.3",
-    "openai": "^6.3.0",
-    "pg": "^8.20.0"
-  },
-  "devDependencies": {
-    "@types/node": "^24.0.0",
-    "@types/pg": "^8.20.0",
-    "tsx": "^4.19.0",
-    "typescript": "^5.8.0"
   }
 }

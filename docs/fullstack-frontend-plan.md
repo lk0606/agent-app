@@ -47,6 +47,11 @@
 agent-app/
   apps/
     api/
+      infra/
+        postgres/
+      evals/
+        cases/
+        reports/
       src/
       package.json
       tsconfig.json
@@ -88,22 +93,18 @@ agent-app/
     config/
       tsconfig/
       eslint/
-  infra/
-    postgres/
   docs/
-  evals/
   package.json
   pnpm-workspace.yaml
 ```
 
-第一阶段可以稍微保守一点：
+第一阶段的保守迁移策略已经完成：
 
-- 先新增 `apps/web`
-- 后端暂时留在当前根目录，避免一次性大搬家
-- 等前端跑通后，再把当前 `src/` 平滑迁移到 `apps/api/src`
-- 同时新增 `packages/api-contract` 放共享类型和 schema
+- 已新增 `apps/web`
+- 后端已从根目录 `src/` 迁移到 `apps/api/src`
+- 已新增 `packages/api-contract` 放共享类型和 schema
 
-这样风险小，节奏也舒服。
+当前重点转向：在新目录结构上继续补齐会话页、任务回放页和流式能力。
 
 ## 4. 前端技术栈建议
 

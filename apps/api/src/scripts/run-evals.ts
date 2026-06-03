@@ -1,6 +1,7 @@
 import "dotenv/config";
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import { createAgentRuntime } from "../app/create-agent-runtime.js";
@@ -33,11 +34,13 @@ interface EvalCaseResult {
   }>;
 }
 
+const apiRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+
 async function main(): Promise<void> {
   const config = loadConfig();
   const { runner, logger, pool } = createAgentRuntime(config);
-  const casesPath = process.argv[2] ?? path.resolve("evals/cases/basic-agent-cases.json");
-  const reportDir = path.resolve("evals/reports");
+  const casesPath = process.argv[2] ?? path.join(apiRoot, "evals/cases/basic-agent-cases.json");
+  const reportDir = path.join(apiRoot, "evals/reports");
 
   const cases = await loadCases(casesPath);
   const results: EvalCaseResult[] = [];

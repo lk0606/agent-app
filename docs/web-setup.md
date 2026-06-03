@@ -17,7 +17,7 @@
 先启动数据库和后端：
 
 ```bash
-docker compose -f infra/postgres/compose.yaml up -d
+docker compose -f apps/api/infra/postgres/compose.yaml up -d
 pnpm run db:migrate
 pnpm run dev:server
 ```

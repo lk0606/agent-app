@@ -16,7 +16,7 @@
 
 评测样例放在：
 
-- `evals/cases/basic-agent-cases.json`
+- `apps/api/evals/cases/basic-agent-cases.json`
 
 运行方式：
 
@@ -26,7 +26,7 @@ pnpm run evals:run
 
 输出结果会写到：
 
-- `evals/reports/`
+- `apps/api/evals/reports/`
 
 当前第一版支持的检查维度：
 

@@ -20,7 +20,8 @@
 - `docs/session-context.md`：会话上下文窗口策略
 - `docs/fullstack-frontend-plan.md`：前后端协同与 Next.js 前端规划
 - `docs/web-setup.md`：Next.js 前端启动与测试说明
-- `src/`：Agent 应用骨架代码
+- `apps/api/src/`：Agent 后端骨架代码
+- `apps/web/src/`：Next.js 前端工作台
 
 ## 当前脚手架能力
 
@@ -39,12 +40,13 @@
 3. 启动开发模式
 
 ```bash
-cp .env.example .env
+cp apps/api/.env.example apps/api/.env
+cp apps/web/.env.local.example apps/web/.env.local
 pnpm install
 pnpm run dev
 ```
 
-在 `.env` 中填入：
+在 `apps/api/.env` 中填入：
 
 ```bash
 HUNYUAN_API_KEY=your_api_key
@@ -62,6 +64,7 @@ HTTP_FETCH_ALLOWED_CONTENT_TYPES=text/html,text/plain,application/json,applicati
 HTTP_FETCH_ALLOW_HOSTS=
 HTTP_FETCH_DENY_HOSTS=localhost,127.0.0.1,0.0.0.0
 PORT=3000
+DATABASE_URL=postgres://agent:agent@127.0.0.1:5432/agent_app
 ```
 
 启动 HTTP 服务：
@@ -89,7 +92,7 @@ curl -X POST http://localhost:3000/agent/run \
 启动本地 PostgreSQL：
 
 ```bash
-docker compose -f infra/postgres/compose.yaml up -d
+docker compose -f apps/api/infra/postgres/compose.yaml up -d
 ```
 
 应用数据库迁移：
@@ -114,6 +117,6 @@ pnpm run task:replay -- demo-task
 
 1. 先看 `docs/learning-plan.md`
 2. 再看 `docs/project-scaffold-plan.md`
-3. 从 `src/index.ts` 开始跑通主流程
+3. 从 `apps/api/src/index.ts` 开始跑通主流程
 4. 观察 `PlannerAgent -> HunyuanLlmClient -> Tool -> HunyuanLlmClient` 的执行链路
 5. 逐步增加工具、记忆、任务编排、API 和评测能力

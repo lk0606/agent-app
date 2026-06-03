@@ -4,8 +4,8 @@
 
 ## 目录
 
-- `infra/postgres/compose.yaml`
-- `infra/postgres/init/001_init.sql`
+- `apps/api/infra/postgres/compose.yaml`
+- `apps/api/infra/postgres/init/001_init.sql`
 
 ## 默认配置
 
@@ -20,25 +20,25 @@
 在项目根目录执行：
 
 ```bash
-docker compose -f infra/postgres/compose.yaml up -d
+docker compose -f apps/api/infra/postgres/compose.yaml up -d
 ```
 
 查看状态：
 
 ```bash
-docker compose -f infra/postgres/compose.yaml ps
+docker compose -f apps/api/infra/postgres/compose.yaml ps
 ```
 
 停止数据库：
 
 ```bash
-docker compose -f infra/postgres/compose.yaml down
+docker compose -f apps/api/infra/postgres/compose.yaml down
 ```
 
 如果你想连数据一起清掉：
 
 ```bash
-docker compose -f infra/postgres/compose.yaml down -v
+docker compose -f apps/api/infra/postgres/compose.yaml down -v
 ```
 
 ## 连接验证

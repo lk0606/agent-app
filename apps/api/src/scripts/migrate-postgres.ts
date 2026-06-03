@@ -2,6 +2,7 @@ import "dotenv/config";
 
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { loadConfig } from "../config/env.js";
 import { getDatabaseConfig } from "../db/connection-config.js";
@@ -12,6 +13,7 @@ const migrations = [
   "002_sessions.sql",
   "003_session_summary.sql",
 ];
+const apiRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "../..");
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -24,7 +26,7 @@ async function main(): Promise<void> {
 
   for (const migration of migrations) {
     // 当前 SQL 都写成 if not exists，重复执行用于把已有数据库补到最新结构。
-    const filePath = resolve(process.cwd(), "infra/postgres/init", migration);
+    const filePath = resolve(apiRoot, "infra/postgres/init", migration);
     const sql = await readFile(filePath, "utf8");
     await pool.query(sql);
     console.log(`Applied ${migration}`);

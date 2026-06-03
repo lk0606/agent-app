@@ -110,7 +110,7 @@ SESSION_HISTORY_CHAR_BUDGET=4000
 pnpm run db:migrate
 ```
 
-新建数据库会在 Docker 初始化时自动执行 `infra/postgres/init/003_session_summary.sql`。
+新建数据库会在 Docker 初始化时自动执行 `apps/api/infra/postgres/init/003_session_summary.sql`。
 
 ## 下一步该怎么演进
 

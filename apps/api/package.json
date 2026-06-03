@@ -1,0 +1,34 @@
+{
+  "name": "@agent-app/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "dotenv_config_path=.env tsx src/index.ts",
+    "dev:server": "dotenv_config_path=.env tsx src/server.ts",
+    "build": "pnpm --filter @agent-app/api-contract build && tsc -p tsconfig.json",
+    "start": "dotenv_config_path=.env node dist/index.js",
+    "start:server": "dotenv_config_path=.env node dist/server.js",
+    "db:check": "dotenv_config_path=.env tsx src/scripts/check-postgres.ts",
+    "db:inspect": "dotenv_config_path=.env tsx src/scripts/inspect-postgres.ts",
+    "db:migrate": "dotenv_config_path=.env tsx src/scripts/migrate-postgres.ts",
+    "evals:run": "dotenv_config_path=.env tsx src/scripts/run-evals.ts",
+    "task:replay": "dotenv_config_path=.env tsx src/scripts/replay-task.ts",
+    "check": "pnpm --filter @agent-app/api-contract build && tsc --noEmit -p tsconfig.json"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@agent-app/api-contract": "workspace:*",
+    "dotenv": "^17.2.3",
+    "openai": "^6.3.0",
+    "pg": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.20.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0"
+  }
+}
