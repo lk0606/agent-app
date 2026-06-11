@@ -9,6 +9,7 @@
 
 ## 目录
 
+- `docs/current-status.md`：**当前进度与下一步（状态源；文首有 30 秒阅读指南）**
 - `docs/learning-plan.md`：渐进式学习成长计划
 - `docs/project-scaffold-plan.md`：项目脚手架搭建计划
 - `docs/persistence-model.md`：持久化模型设计
@@ -115,8 +116,9 @@ pnpm run task:replay -- demo-task
 
 ## 推荐演进顺序
 
-1. 先看 `docs/learning-plan.md`
-2. 再看 `docs/project-scaffold-plan.md`
-3. 从 `apps/api/src/index.ts` 开始跑通主流程
-4. 观察 `PlannerAgent -> HunyuanLlmClient -> Tool -> HunyuanLlmClient` 的执行链路
-5. 逐步增加工具、记忆、任务编排、API 和评测能力
+1. 先看 **`docs/current-status.md`**（当前进度与下一步）
+2. 再看 `docs/learning-plan.md`
+3. 再看 `docs/project-scaffold-plan.md`
+4. 从 `apps/api/src/index.ts` 开始跑通主流程
+5. 观察 `PlannerAgent -> HunyuanLlmClient -> Tool -> HunyuanLlmClient` 的执行链路
+6. 逐步增加工具、记忆、任务编排、API 和评测能力

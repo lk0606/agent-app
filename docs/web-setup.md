@@ -1,5 +1,7 @@
 # Web Setup
 
+> 进度与下一步见 `docs/current-status.md`。
+
 这份文档记录 Next.js 前端的启动、配置和自测方式。前端当前定位是 Agent Workbench：用真实 UI 快速验证后端的 session、task、tool calls。
 
 ## 当前技术栈

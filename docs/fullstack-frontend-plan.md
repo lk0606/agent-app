@@ -1,6 +1,8 @@
 # Fullstack Frontend Plan
 
-这份文档记录当前 Agent 后端进度，以及下一阶段 Next.js 前端规划。后续前后端一起演进时，以这里作为阶段基线。
+这份文档记录 Agent 后端能力说明，以及 Next.js 前端的技术选型与 Step 设计。
+
+**进度状态以 `docs/current-status.md` 为准**（做完一项更新一项）。本文 §6 的 Step 状态小节仅作摘要，详细验收与「下一步」请看该文件。
 
 ## 1. 当前后端做到哪一步
 
@@ -432,10 +434,7 @@ export default async function LocaleLayout({ children, params }) {
 - 能复用 `sessionId` 连续追问
 - 能展示 toolCalls
 
-状态：
-
-- 已完成最小版本，详见 `docs/web-setup.md`
-- 当前先用 Tailwind + 业务组件跑通闭环，`shadcn/ui` 等基础组件复用需求稳定后再引入
+状态：**已完成** — 详见 `docs/current-status.md` §C Step 1、`docs/web-setup.md`
 
 ### Step 2：后端补会话查询 API
 
@@ -450,10 +449,7 @@ export default async function LocaleLayout({ children, params }) {
 - 点击 session 能恢复消息时间线
 - 能看到 summary preview
 
-状态：
-
-- 后端接口已完成
-- 前端尚未接入，会作为下一步 Web 任务
+状态：**部分完成** — 后端已完成，前端未接入；详见 `docs/current-status.md` §C Step 2（**当前 P0**）
 
 ### Step 3：共享 API contract
 
@@ -467,9 +463,7 @@ export default async function LocaleLayout({ children, params }) {
 - 前后端类型不再手写两份
 - API 改字段时 TypeScript 能提醒前端同步改
 
-状态：
-
-- 已完成第一版，详见 `docs/api-contract.md`
+状态：**已完成** — 详见 `docs/current-status.md` §C Step 3、`docs/api-contract.md`
 
 ### Step 4：Agent 调试面板
 
@@ -482,6 +476,8 @@ export default async function LocaleLayout({ children, params }) {
 
 - 一次请求为什么这样回答，前端能看出大概链路
 
+状态：**部分完成** — sessionId/taskId/toolCalls 已有；timeline、summary、task error 待补；详见 `docs/current-status.md` §C Step 4
+
 ### Step 5：流式响应
 
 - 后端增加 SSE 或 AI SDK stream-compatible endpoint
@@ -491,6 +487,8 @@ export default async function LocaleLayout({ children, params }) {
 验收：
 
 - 用户能看到模型生成中、工具调用中、工具完成、最终回答
+
+状态：**未开始** — 详见 `docs/current-status.md` §C Step 5
 
 ## 7. 第一阶段安装建议
 

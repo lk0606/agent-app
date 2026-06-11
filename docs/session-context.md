@@ -1,5 +1,7 @@
 # Session Context Strategy
 
+> 进度状态见 `docs/current-status.md`。下文「下一步」为历史设计记录；会话详情 API 后端已实现，前端接入见 Step 2。
+
 这是“会话系统与用户上下文”阶段的下一步：让 session 历史不仅能被模型使用，还能被稳定地控制。
 
 当前项目采用的是“持久化摘要 + 窗口”的上下文注入：
