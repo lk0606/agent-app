@@ -9,7 +9,7 @@
 
 ## 目录
 
-- `docs/current-status.md`：**当前进度与下一步（状态源；文首有 30 秒阅读指南）**
+- `docs/current-status.md`：**当前进度与下一步（后端优先路线 + 每项测试方法；文首有阅读指南）**
 - `docs/learning-plan.md`：渐进式学习成长计划
 - `docs/project-scaffold-plan.md`：项目脚手架搭建计划
 - `docs/persistence-model.md`：持久化模型设计
