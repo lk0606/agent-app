@@ -46,6 +46,30 @@ export const SessionMemoryMessageSchema = MemoryMessageSchema.extend({
   taskId: z.string(),
 });
 
+export const PlannerStepOutcomeSchema = z.enum([
+  "direct_answer",
+  "tool_executed",
+  "tool_failed",
+  "budget_exceeded",
+  "duplicate_skipped",
+  "fallback_answer",
+]);
+
+export const PlannerStepRecordSchema = z.object({
+  id: z.string(),
+  taskId: z.string(),
+  step: z.number().int().positive(),
+  needsTool: z.boolean(),
+  toolName: z.string().nullable(),
+  toolInput: z.string().nullable(),
+  outcome: PlannerStepOutcomeSchema,
+  errorCode: z.string().nullable(),
+  errorMessage: z.string().nullable(),
+  durationMs: z.number().int().nonnegative(),
+  createdAt: IsoDateTimeSchema,
+  finishedAt: IsoDateTimeSchema,
+});
+
 export const ToolCallRecordSchema = z.object({
   id: z.string(),
   taskId: z.string(),
@@ -110,6 +134,8 @@ export const GetTaskResponseSchema = z.object({
   task: TaskRecordSchema,
   messages: z.array(MemoryMessageSchema),
   toolCalls: z.array(ToolCallRecordSchema),
+  /** Planner 决策链（非 OpenTelemetry traceId）；命名见 docs/current-status.md 【H 节】 */
+  plannerTrace: z.array(PlannerStepRecordSchema),
 });
 
 export const HealthResponseSchema = z.object({

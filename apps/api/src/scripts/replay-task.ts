@@ -20,7 +20,7 @@ async function main(): Promise<void> {
 
   await verifyPgConnection(pool);
 
-  const [task, messages, toolCalls] = await Promise.all([
+  const [task, messages, toolCalls, plannerTrace] = await Promise.all([
     pool.query(
       `
         select id, input, status, summary, error_code, error_message, created_at, updated_at, finished_at
@@ -47,6 +47,16 @@ async function main(): Promise<void> {
       `,
       [taskId],
     ),
+    // planner_steps：与 HTTP GET /tasks/:taskId 的 plannerTrace 字段同源。
+    pool.query(
+      `
+        select step, needs_tool, tool_name, tool_input, outcome, error_code, error_message, duration_ms, created_at, finished_at
+        from planner_steps
+        where task_id = $1
+        order by step asc, id asc
+      `,
+      [taskId],
+    ),
   ]);
 
   console.log(
@@ -55,6 +65,7 @@ async function main(): Promise<void> {
         task: task.rows[0] ?? null,
         messages: messages.rows,
         toolCalls: toolCalls.rows,
+        plannerTrace: plannerTrace.rows,
       },
       null,
       2,

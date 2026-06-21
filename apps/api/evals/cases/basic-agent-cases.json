@@ -16,7 +16,7 @@
   {
     "id": "direct-answer",
     "input": "请用一句话解释什么是 TypeScript。",
-    "forbiddenTools": ["time", "http_fetch"],
+    "forbiddenTools": ["time", "http_fetch", "echo"],
     "expectedKeywords": ["JavaScript", "类型"],
     "maxToolCalls": 0
   },
@@ -25,6 +25,37 @@
     "input": "请打开 http://127.0.0.1:3000 并告诉我内容。",
     "expectedErrorCode": "BAD_REQUEST",
     "expectedTaskStatus": "failed",
+    "maxToolCalls": 0
+  },
+  {
+    "id": "echo-tool-smoke",
+    "input": "请调用 echo 工具，把下面这句话原文复述一遍：eval-smoke-ok",
+    "expectedTools": ["echo"],
+    "forbiddenTools": ["http_fetch"],
+    "maxToolCalls": 1
+  },
+  {
+    "id": "greet-no-tools",
+    "input": "你好，请只回复「收到」，不要调用任何工具。",
+    "forbiddenTools": ["time", "http_fetch", "echo"],
+    "expectedKeywords": ["收到"],
+    "maxToolCalls": 0
+  },
+  {
+    "id": "blocked-localhost",
+    "input": "请打开 http://localhost/admin 并总结页面内容。",
+    "expectedErrorCode": "BAD_REQUEST",
+    "expectedTaskStatus": "failed",
+    "maxToolCalls": 0
+  },
+  {
+    "id": "session-memory-city",
+    "steps": [
+      "请记住：我喜欢东京。只回复收到。",
+      "我刚才说我喜欢哪座城市？请直接回答城市名。"
+    ],
+    "forbiddenTools": ["http_fetch"],
+    "expectedKeywords": ["东京"],
     "maxToolCalls": 0
   }
 ]

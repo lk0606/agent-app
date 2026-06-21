@@ -1,4 +1,6 @@
 import type {
+  PlannerStepOutcome,
+  PlannerStepRecord,
   SessionRecord,
   SessionStatus,
   TaskRecord,
@@ -61,6 +63,21 @@ export interface RecordToolCallInput {
   finishedAt?: string | null;
 }
 
+export interface RecordPlannerStepInput {
+  /** 对应 planner_steps 表一行；由 PlannerAgent 在每轮 plan 结束时写入 */
+  taskId: string;
+  step: number;
+  needsTool: boolean;
+  toolName?: string | null;
+  toolInput?: string | null;
+  outcome: PlannerStepOutcome;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  durationMs: number;
+  createdAt: string;
+  finishedAt: string;
+}
+
 export interface MemoryStore {
   createSession(input: CreateSessionInput): Promise<void>;
   updateSession(sessionId: string, input: UpdateSessionInput): Promise<void>;
@@ -76,4 +93,6 @@ export interface MemoryStore {
   listSessionMessages(sessionId: string, limit: number): Promise<SessionMemoryMessage[]>;
   recordToolCall(input: RecordToolCallInput): Promise<void>;
   listTaskToolCalls(taskId: string): Promise<ToolCallRecord[]>;
+  recordPlannerStep(input: RecordPlannerStepInput): Promise<void>;
+  listTaskPlannerSteps(taskId: string): Promise<PlannerStepRecord[]>;
 }

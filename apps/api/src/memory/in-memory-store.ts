@@ -1,11 +1,17 @@
-import type { SessionRecord, TaskRecord, ToolCallRecord } from "./persistence-model.js";
-import type { MemoryMessage, MemoryStore, SessionMemoryMessage } from "./memory-store.js";
+import type { PlannerStepRecord, SessionRecord, TaskRecord, ToolCallRecord } from "./persistence-model.js";
+import type {
+  MemoryMessage,
+  MemoryStore,
+  RecordPlannerStepInput,
+  SessionMemoryMessage,
+} from "./memory-store.js";
 
 export class InMemoryStore implements MemoryStore {
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly tasks = new Map<string, TaskRecord>();
   private readonly store = new Map<string, MemoryMessage[]>();
   private readonly toolCalls = new Map<string, ToolCallRecord[]>();
+  private readonly plannerSteps = new Map<string, PlannerStepRecord[]>();
 
   async createSession(input: {
     id: string;
@@ -197,5 +203,30 @@ export class InMemoryStore implements MemoryStore {
 
   async listTaskToolCalls(taskId: string): Promise<ToolCallRecord[]> {
     return [...(this.toolCalls.get(taskId) ?? [])].sort((left, right) => left.step - right.step);
+  }
+
+  async recordPlannerStep(input: RecordPlannerStepInput): Promise<void> {
+    const rows = this.plannerSteps.get(input.taskId) ?? [];
+
+    rows.push({
+      id: `${input.taskId}-planner-${input.step}-${rows.length + 1}`,
+      taskId: input.taskId,
+      step: input.step,
+      needsTool: input.needsTool,
+      toolName: input.toolName ?? null,
+      toolInput: input.toolInput ?? null,
+      outcome: input.outcome,
+      errorCode: input.errorCode ?? null,
+      errorMessage: input.errorMessage ?? null,
+      durationMs: input.durationMs,
+      createdAt: input.createdAt,
+      finishedAt: input.finishedAt,
+    });
+
+    this.plannerSteps.set(input.taskId, rows);
+  }
+
+  async listTaskPlannerSteps(taskId: string): Promise<PlannerStepRecord[]> {
+    return [...(this.plannerSteps.get(taskId) ?? [])].sort((left, right) => left.step - right.step);
   }
 }

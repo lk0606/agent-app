@@ -4,12 +4,20 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+import { randomUUID } from "node:crypto";
+
 import { createAgentRuntime } from "../app/create-agent-runtime.js";
 import { loadConfig } from "../config/env.js";
+import { verifyPgConnection } from "../db/pg-client.js";
+import { classifyError } from "../shared/app-error.js";
+import type { AgentResponse } from "../agents/base-agent.js";
 
 interface EvalCase {
   id: string;
-  input: string;
+  /** 单轮任务：与 steps 二选一 */
+  input?: string;
+  /** 多轮会话：同一 session 下按顺序执行，在最后一轮结果上断言；与 input 二选一 */
+  steps?: string[];
   expectedTools?: string[];
   forbiddenTools?: string[];
   expectedKeywords?: string[];
@@ -38,7 +46,10 @@ const apiRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  const { runner, logger, pool } = createAgentRuntime(config);
+  const { runner, logger, memory, pool } = createAgentRuntime(config);
+
+  await verifyPgConnection(pool);
+  // 未连上 DB 时 TaskRunner 会秒失败且 errorCode 全是 INTERNAL_ERROR，先预检便于排查。
   const casesPath = process.argv[2] ?? path.join(apiRoot, "evals/cases/basic-agent-cases.json");
   const reportDir = path.join(apiRoot, "evals/reports");
 
@@ -56,16 +67,13 @@ async function main(): Promise<void> {
     let errorCode: string | null = null;
 
     try {
-      const result = await runner.run({
-        taskId,
-        input: testCase.input,
-      });
+      const result = await runEvalCase(testCase, taskId, runner, memory);
 
       summary = result.summary;
       toolCalls = result.toolCalls;
     } catch (error: unknown) {
       taskStatus = "failed";
-      errorCode = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code ?? "") : null;
+      errorCode = classifyError(error).code;
     }
 
     const durationMs = Date.now() - startedAt;
@@ -107,11 +115,64 @@ async function main(): Promise<void> {
 
   console.log(JSON.stringify({ reportPath: filePath, ...report }, null, 2));
   await pool.end();
+
+  if (report.failed > 0) {
+    // 有失败用例时非零退出，方便 CI / shell 脚本感知回归结果。
+    process.exitCode = 1;
+  }
 }
 
 async function loadCases(filePath: string): Promise<EvalCase[]> {
   const raw = await readFile(filePath, "utf8");
-  return JSON.parse(raw) as EvalCase[];
+  const cases = JSON.parse(raw) as EvalCase[];
+
+  // 每条 case 只能是「单轮 input」或「多轮 steps」之一，用 XOR 校验（见下方 hasInput === hasSteps）。
+  for (const testCase of cases) {
+    const hasInput = typeof testCase.input === "string" && testCase.input.trim().length > 0;
+    const hasSteps = Array.isArray(testCase.steps) && testCase.steps.length > 0;
+
+    // hasInput 与 hasSteps 同为 true/false 都非法：必须恰好一个有、一个没有。
+    if (hasInput === hasSteps) {
+      throw new Error(`Eval case "${testCase.id}" must have exactly one of "input" or "steps".`);
+    }
+  }
+
+  return cases;
+}
+
+async function runEvalCase(
+  testCase: EvalCase,
+  taskId: string,
+  runner: ReturnType<typeof createAgentRuntime>["runner"],
+  memory: ReturnType<typeof createAgentRuntime>["memory"],
+): Promise<AgentResponse> {
+  if (testCase.steps) {
+    // 多轮：共用同一 sessionId，每轮独立 taskId；断言只看最后一轮的 summary / toolCalls。
+    const sessionId = randomUUID();
+    await memory.createSession({ id: sessionId });
+
+    let lastResult: AgentResponse | null = null;
+
+    for (const [index, stepInput] of testCase.steps.entries()) {
+      const stepTaskId = `${taskId}-step-${index + 1}`;
+      lastResult = await runner.run({
+        taskId: stepTaskId,
+        sessionId,
+        input: stepInput,
+      });
+    }
+
+    if (!lastResult) {
+      throw new Error(`Eval case "${testCase.id}" steps produced no result.`);
+    }
+
+    return lastResult;
+  }
+
+  return runner.run({
+    taskId,
+    input: testCase.input!,
+  });
 }
 
 function evaluateCase(

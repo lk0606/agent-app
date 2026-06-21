@@ -1,11 +1,18 @@
 import type { Pool } from "pg";
 
-import type { SessionRecord, SessionStatus, TaskRecord, ToolCallRecord } from "./persistence-model.js";
+import type {
+  PlannerStepRecord,
+  SessionRecord,
+  SessionStatus,
+  TaskRecord,
+  ToolCallRecord,
+} from "./persistence-model.js";
 import type {
   CreateSessionInput,
   CreateTaskInput,
   MemoryMessage,
   MemoryStore,
+  RecordPlannerStepInput,
   RecordToolCallInput,
   SessionMemoryMessage,
   UpdateSessionInput,
@@ -41,7 +48,7 @@ type TaskRow = {
   updated_at: DbTimestamp;
   finished_at: DbTimestamp | null;
 };
-``
+
 type ToolCallRow = {
   id: string;
   task_id: string;
@@ -54,6 +61,21 @@ type ToolCallRow = {
   error_message: string | null;
   created_at: DbTimestamp;
   finished_at: DbTimestamp | null;
+};
+
+type PlannerStepRow = {
+  id: string;
+  task_id: string;
+  step: number;
+  needs_tool: boolean;
+  tool_name: string | null;
+  tool_input: string | null;
+  outcome: PlannerStepRecord["outcome"];
+  error_code: string | null;
+  error_message: string | null;
+  duration_ms: number;
+  created_at: DbTimestamp;
+  finished_at: DbTimestamp;
 };
 
 export class PostgresMemoryStore implements MemoryStore {
@@ -359,6 +381,80 @@ export class PostgresMemoryStore implements MemoryStore {
       errorMessage: row.error_message,
       createdAt: row.created_at.toISOString(),
       finishedAt: row.finished_at ? row.finished_at.toISOString() : null,
+    }));
+  }
+
+  async recordPlannerStep(input: RecordPlannerStepInput): Promise<void> {
+    // planner_steps：Planner 每轮 llm.plan 的决策快照，供 plannerTrace API / replay 还原「为何选这个工具」。
+    await this.pool.query(
+      `
+        insert into planner_steps (
+          task_id,
+          step,
+          needs_tool,
+          tool_name,
+          tool_input,
+          outcome,
+          error_code,
+          error_message,
+          duration_ms,
+          created_at,
+          finished_at
+        )
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `,
+      [
+        input.taskId,
+        input.step,
+        input.needsTool,
+        input.toolName ?? null,
+        input.toolInput ?? null,
+        input.outcome,
+        input.errorCode ?? null,
+        input.errorMessage ?? null,
+        input.durationMs,
+        input.createdAt,
+        input.finishedAt,
+      ],
+    );
+  }
+
+  async listTaskPlannerSteps(taskId: string): Promise<PlannerStepRecord[]> {
+    const result = await this.pool.query<PlannerStepRow>(
+      `
+        select
+          id,
+          task_id,
+          step,
+          needs_tool,
+          tool_name,
+          tool_input,
+          outcome,
+          error_code,
+          error_message,
+          duration_ms,
+          created_at,
+          finished_at
+        from planner_steps
+        where task_id = $1
+        order by step asc, id asc
+      `,
+      [taskId],
+    );
+
+    return result.rows.map((row) => ({
+      id: row.id,
+      taskId: row.task_id,
+      step: row.step,
+      needsTool: row.needs_tool,
+      toolName: row.tool_name,
+      toolInput: row.tool_input,
+      outcome: row.outcome,
+      errorCode: row.error_code,
+      errorMessage: row.error_message,
+      durationMs: row.duration_ms,
+      createdAt: row.created_at.toISOString(),
+      finishedAt: row.finished_at.toISOString(),
     }));
   }
 

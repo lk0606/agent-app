@@ -25,7 +25,7 @@
 当前后端后续：
 
 - 增加 streaming endpoint，让前端可以展示模型生成中、工具调用中、工具完成等实时状态
-- 增加更完整的 task trace，方便前端调试面板还原每一步决策
+- 增加更完整的 Planner 决策链（`plannerTrace`），方便前端调试面板还原每一步决策
 
 ## 2. 是否前后端放一个仓库
 
@@ -144,7 +144,7 @@ agent-app/
 使用原则：
 
 - `apps/web/src/components/ui` 只放 shadcn 生成的基础组件
-- `apps/web/src/components/agent` 放业务组件，比如消息气泡、工具调用卡片、trace 面板
+- `apps/web/src/components/agent` 放业务组件，比如消息气泡、工具调用卡片、plannerTrace 决策面板
 - 不要一开始抽 `packages/ui`，除非后面真的有多个前端应用复用
 
 ### 状态与请求

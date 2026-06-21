@@ -1,3 +1,4 @@
+import type { RecordPlannerStepInput } from "../memory/memory-store.js";
 import { AppError } from "../shared/app-error.js";
 import type { Agent, AgentContext, AgentRequest, AgentResponse } from "./base-agent.js";
 
@@ -25,6 +26,10 @@ export class PlannerAgent implements Agent {
     let finalAnswer = "";
 
     for (let step = 0; step < this.options.maxSteps; step += 1) {
+      const stepNumber = step + 1;
+      const stepStartedAt = Date.now();
+      const stepCreatedAt = new Date(stepStartedAt).toISOString();
+
       const decision = await context.llm.plan({
         sessionSummary: sessionContext.sessionSummary,
         conversationHistory: sessionContext.recentHistory,
@@ -41,12 +46,31 @@ export class PlannerAgent implements Agent {
       });
 
       context.logger.info("Planner step decided", {
-        step: step + 1,
+        step: stepNumber,
         needsTool: decision.needsTool,
         toolName: decision.toolName,
       });
 
+      const recordStep = async (input: Omit<RecordPlannerStepInput, "taskId" | "step" | "createdAt">) => {
+        // 与 tool_calls 不同：这里记录的是「规划决策」，不是工具执行结果（见 GET /tasks plannerTrace）。
+        await context.memory.recordPlannerStep({
+          taskId: request.taskId,
+          step: stepNumber,
+          createdAt: stepCreatedAt,
+          ...input,
+        });
+      };
+
       if (!decision.needsTool || !decision.toolName) {
+        await recordStep({
+          needsTool: decision.needsTool,
+          toolName: decision.toolName ?? null,
+          toolInput: null,
+          outcome: "direct_answer",
+          durationMs: Date.now() - stepStartedAt,
+          finishedAt: new Date().toISOString(),
+        });
+
         finalAnswer = decision.draftAnswer;
         break;
       }
@@ -68,6 +92,15 @@ export class PlannerAgent implements Agent {
             toolInput: lastCall.input,
             toolOutput: lastCall.output,
           });
+
+          await recordStep({
+            needsTool: true,
+            toolName: decision.toolName,
+            toolInput: decision.toolInput ?? request.input,
+            outcome: "budget_exceeded",
+            durationMs: Date.now() - stepStartedAt,
+            finishedAt: new Date().toISOString(),
+          });
           break;
         }
       }
@@ -83,7 +116,7 @@ export class PlannerAgent implements Agent {
 
       if (existingCall) {
         context.logger.info("Duplicate tool call skipped", {
-          step: step + 1,
+          step: stepNumber,
           toolName: tool.name,
           toolInput,
         });
@@ -96,11 +129,20 @@ export class PlannerAgent implements Agent {
           toolInput: existingCall.input,
           toolOutput: existingCall.output,
         });
+
+        await recordStep({
+          needsTool: true,
+          toolName: tool.name,
+          toolInput,
+          outcome: "duplicate_skipped",
+          durationMs: Date.now() - stepStartedAt,
+          finishedAt: new Date().toISOString(),
+        });
         break;
       }
 
       context.logger.info("Tool execution started", {
-        step: step + 1,
+        step: stepNumber,
         toolName: tool.name,
         toolInput,
       });
@@ -113,7 +155,7 @@ export class PlannerAgent implements Agent {
         });
 
         context.logger.info("Tool execution finished", {
-          step: step + 1,
+          step: stepNumber,
           toolName: tool.name,
           outputPreview: toolOutput.slice(0, 240),
         });
@@ -126,7 +168,7 @@ export class PlannerAgent implements Agent {
 
         await context.memory.recordToolCall({
           taskId: request.taskId,
-          step: step + 1,
+          step: stepNumber,
           toolName: tool.name,
           toolInput,
           toolOutput,
@@ -140,16 +182,39 @@ export class PlannerAgent implements Agent {
           input: toolInput,
           output: toolOutput,
         });
+
+        await recordStep({
+          needsTool: true,
+          toolName: tool.name,
+          toolInput,
+          outcome: "tool_executed",
+          durationMs: Date.now() - stepStartedAt,
+          finishedAt: new Date().toISOString(),
+        });
       } catch (error: unknown) {
+        const errorCode = error instanceof AppError ? error.code : "TOOL_ERROR";
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
         await context.memory.recordToolCall({
           taskId: request.taskId,
-          step: step + 1,
+          step: stepNumber,
           toolName: tool.name,
           toolInput,
           status: "failed",
-          errorCode: error instanceof AppError ? error.code : "TOOL_ERROR",
-          errorMessage: error instanceof Error ? error.message : String(error),
+          errorCode,
+          errorMessage,
           createdAt: startedAt,
+          finishedAt: new Date().toISOString(),
+        });
+
+        await recordStep({
+          needsTool: true,
+          toolName: tool.name,
+          toolInput,
+          outcome: "tool_failed",
+          errorCode,
+          errorMessage,
+          durationMs: Date.now() - stepStartedAt,
           finishedAt: new Date().toISOString(),
         });
 
@@ -164,6 +229,9 @@ export class PlannerAgent implements Agent {
         throw new AppError("INTERNAL_ERROR", "Agent ended without a final answer or tool call.");
       }
 
+      const fallbackStartedAt = Date.now();
+      const fallbackCreatedAt = new Date(fallbackStartedAt).toISOString();
+
       finalAnswer = await context.llm.answerWithTool({
         sessionSummary: sessionContext.sessionSummary,
         conversationHistory: sessionContext.recentHistory,
@@ -171,6 +239,19 @@ export class PlannerAgent implements Agent {
         toolName: lastCall.toolName,
         toolInput: lastCall.input,
         toolOutput: lastCall.output,
+      });
+
+      await context.memory.recordPlannerStep({
+        // 循环因 maxSteps 结束且尚无 finalAnswer 时，用最后一次工具结果强行生成回答。
+        taskId: request.taskId,
+        step: toolCalls.length + 1,
+        needsTool: false,
+        toolName: lastCall.toolName,
+        toolInput: lastCall.input,
+        outcome: "fallback_answer",
+        durationMs: Date.now() - fallbackStartedAt,
+        createdAt: fallbackCreatedAt,
+        finishedAt: new Date().toISOString(),
       });
     }
 

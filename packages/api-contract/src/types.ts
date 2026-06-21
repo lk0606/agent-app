@@ -12,6 +12,7 @@ import type {
   ListSessionsQuerySchema,
   ListSessionsResponseSchema,
   MemoryMessageSchema,
+  PlannerStepRecordSchema,
   RunAgentRequestSchema,
   RunAgentResponseSchema,
   SessionMemoryMessageSchema,
@@ -25,6 +26,7 @@ export type TaskRecord = z.infer<typeof TaskRecordSchema>;
 export type MemoryMessage = z.infer<typeof MemoryMessageSchema>;
 export type SessionMemoryMessage = z.infer<typeof SessionMemoryMessageSchema>;
 export type ToolCallRecord = z.infer<typeof ToolCallRecordSchema>;
+export type PlannerStepRecord = z.infer<typeof PlannerStepRecordSchema>;
 
 export type AgentToolCall = z.infer<typeof AgentToolCallSchema>;
 export type AgentResult = z.infer<typeof AgentResultSchema>;

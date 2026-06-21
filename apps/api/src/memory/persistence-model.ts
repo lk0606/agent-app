@@ -2,6 +2,15 @@ export type TaskStatus = "pending" | "running" | "succeeded" | "failed";
 
 export type ToolCallStatus = "succeeded" | "failed" | "skipped";
 
+/** Planner 单步结束时的结果类型，写入 planner_steps.outcome / GET /tasks plannerTrace[].outcome */
+export type PlannerStepOutcome =
+  | "direct_answer"
+  | "tool_executed"
+  | "tool_failed"
+  | "budget_exceeded"
+  | "duplicate_skipped"
+  | "fallback_answer";
+
 export type SessionStatus = "active" | "archived";
 
 export interface SessionRecord {
@@ -50,4 +59,19 @@ export interface ToolCallRecord {
   errorMessage: string | null;
   createdAt: string;
   finishedAt: string | null;
+}
+
+export interface PlannerStepRecord {
+  id: string;
+  taskId: string;
+  step: number;
+  needsTool: boolean;
+  toolName: string | null;
+  toolInput: string | null;
+  outcome: PlannerStepOutcome;
+  errorCode: string | null;
+  errorMessage: string | null;
+  durationMs: number;
+  createdAt: string;
+  finishedAt: string;
 }

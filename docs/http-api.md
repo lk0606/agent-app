@@ -152,9 +152,32 @@ GET /tasks/:taskId
     "summary": "..."
   },
   "messages": [],
-  "toolCalls": []
+  "toolCalls": [],
+  "plannerTrace": [
+    {
+      "step": 1,
+      "needsTool": true,
+      "toolName": "time",
+      "toolInput": "...",
+      "outcome": "tool_executed",
+      "errorCode": null,
+      "errorMessage": null,
+      "durationMs": 842
+    }
+  ]
 }
 ```
+
+`plannerTrace` 为 **Planner 决策链**（每轮 `llm.plan` 的结果），**不是** OpenTelemetry / 分布式链路里的 `traceId`。命名规则见 `docs/current-status.md` 【H 节】。
+
+| 字段 | 含义 |
+|------|------|
+| `plannerTrace` | 模型每一步要不要工具、选哪个、耗时、outcome（来自 `planner_steps` 表） |
+| `toolCalls` | 工具实际执行记录（来自 `tool_calls` 表） |
+
+`plannerTrace` 主要字段：`step`、`needsTool`、`toolName`、耗时（`durationMs`）、错误（`errorCode` / `errorMessage`）、结果类型（`outcome`）。
+
+`outcome` 取值：`direct_answer` | `tool_executed` | `tool_failed` | `budget_exceeded` | `duplicate_skipped` | `fallback_answer`。
 
 这个接口主要给前端调试面板和任务回放详情使用。
 

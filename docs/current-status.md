@@ -2,7 +2,7 @@
 
 这是项目的**唯一进度状态源**。做完一项就更新一项，其他文档只保留设计细节，不再各自维护「已完成 / 下一步」。
 
-最后更新：2026-06-03（采用后端优先路线）
+最后更新：2026-06-09（新增【H 节】命名约定）
 
 ## 30 秒阅读指南
 
@@ -11,7 +11,7 @@
 **每天开工前（必看）：**
 
 1. 看 **[当前结论](#当前结论先看这里)** —— 今天该做什么、有没有阻塞
-2. 看 **[【E 节】后端优先路线](#e-后端优先路线当前采用)** —— 后端学习任务 + 每项的测试方法
+2. 看 **[【E 节】后端优先路线](#e-后端优先路线当前采用)** —— 后端学习任务、测试方法、**学习要点与代码阅读路径**
 3. 前端任务看 **[【C 节】前端 Web](#c-前端-web按-step)**（当前搁置，SSE 阶段除外）
 
 **需要细节时再跳转：**
@@ -25,6 +25,8 @@
 | 后端还能做什么 | 本文件 [【B 节】后端能力](#b-后端-agent-能力) |
 | eval 是什么 | 本文件 [术语：eval](#术语eval-是什么) |
 | 后端任务怎么测 | 本文件 [【E 节】](#e-后端优先路线当前采用) 每项下的「测试方法」 |
+| 后端任务学了什么、代码从哪读 | 本文件 [【E 节】](#e-后端优先路线当前采用) 每项下的「学习要点」「代码怎么读」 |
+| API / 表 / 字段怎么命名 | 本文件 [【H 节】命名约定](#h-命名约定) |
 | 所有文档分工 | 本文件 [【G 节】文档索引](#g-文档索引) |
 
 **状态怎么读：**
@@ -36,7 +38,7 @@
 | `进行中` | 已开工、未验收（开工后可手动标上） |
 | `未开始` | 还没做 |
 
-**当前开发重点（后端优先）：** 见 [【E 节】](#e-后端优先路线当前采用) —— 当前 P0 是 **扩展 eval 回归基线**。前端 Step 2/4 暂缓；**SSE 阶段必须接最小前端**才能看流式效果。
+**当前开发重点（后端优先）：** 见 [【E 节】](#e-后端优先路线当前采用) —— 当前 P2 是 **SSE 流式（E.3）**。E.1 eval（8 条）与 E.2 Planner 决策链 API（`plannerTrace`）已完成。前端 Step 2/4 暂缓；**SSE 阶段必须接最小前端**才能看流式效果。
 
 ---
 
@@ -45,10 +47,36 @@
 每完成一个可验收项：
 
 1. 在本文件对应条目把状态改为 `已完成` 或 `进行中`
-2. **在【E 节】对应任务下补充或更新「测试方法」**（见下方约定）
-3. 若是 Step 级任务，同步改 `docs/fullstack-frontend-plan.md` 里该 Step 的「状态」小节（一行引用即可）
-4. 若涉及启动方式或目录变化，同步改 `README.md` 与相关 setup 文档
-5. 更新本文件顶部的「最后更新」日期
+2. **在【E 节】对应任务下补充或更新「测试方法」「学习要点」「代码怎么读」**（见下方约定）
+3. **在改动过的源码里补必要注释**（见下方「代码注释」约定；只注释非显而易见的业务/设计点）
+4. **新 API / 表 / 字段命名须符合 [【H 节】命名约定](#h-命名约定)**（避免与业界术语混淆）
+5. 若是 Step 级任务，同步改 `docs/fullstack-frontend-plan.md` 里该 Step 的「状态」小节（一行引用即可）
+6. 若涉及启动方式或目录变化，同步改 `README.md` 与相关 setup 文档
+7. 更新本文件顶部的「最后更新」日期
+
+### 任务完成后的固定交付（【E 节】每项必含）
+
+每做完一项后端（或需要联调的前端）任务，**必须**在【E 节】对应条目写齐以下四块，并在**代码里补注释**（未完成前可只写「测试方法」占位）：
+
+| 块 | 写什么 |
+|----|--------|
+| **已交付** | 改了哪些文件 / 表 / 接口（ bullet 列表） |
+| **测试方法** | 见下方细则 |
+| **学习要点** | 本次主要概念、模式、和 Agent 工程的关系（3–5 条，偏「为什么」） |
+| **代码怎么读** | 建议阅读顺序（表格：顺序 → 文件 → 看什么）+ 一句心智模型或数据流 |
+| **代码注释** | 见下方「代码注释」约定（写在源码里，不重复贴进【E 节】） |
+
+AI / 协作者交付任务时：**聊天里说明 + 源码注释 + 合并前写回本文件【E 节】**，文档与代码一致。
+
+### 代码注释（固定约定）
+
+每做完一项，在**本次改动的文件**里补必要注释，原则：
+
+- **只注释非显而易见的内容**：业务规则、表/字段分工、巧妙判断（如 XOR 校验）、与另一概念的区别（如 `plannerTrace` vs `toolCalls`、vs 分布式 `traceId`）
+- **不注释**一眼能看懂的赋值、import、标准 CRUD
+- **优先注释**：入口脚本、Agent 核心循环、新表/新 API 字段、契约包 schema、迁移 SQL 文件头
+
+示例位置（E.1/E.2 已示范）：`run-evals.ts` 的 XOR 校验、`planner-agent.ts` 的 `recordStep`、`004_planner_steps.sql` 表头说明。
 
 ### 任务完成后的测试方法（固定约定）
 
@@ -59,7 +87,7 @@
 - 预期结果（返回字段、日志、eval 通过率、UI 现象）
 - 失败时怎么排查（看哪张表、哪条日志、`task:replay` 用哪个 id）
 
-开发时由 AI/协作者交付任务时一并给出测试方法；合并前进文档写回【E 节】。
+开发时由 AI/协作者交付任务时一并给出：**测试方法 + 学习要点 + 代码怎么读 + 源码注释**；命名符合【H 节】；合并前进文档写回【E 节】。
 
 状态取值：
 
@@ -76,7 +104,7 @@
 
 **路线：** 后端优先学习（见【E 节】）。现有 chat 前端够用，日常用 `curl` + `evals:run` + `task:replay` 验证即可。
 
-**你现在最该做（P0）：** 扩展 `apps/api/evals/cases/`，把 eval 变成「改后端必跑」的回归基线。
+**你现在最该做（P2）：** 实现 **E.3 Streaming endpoint（SSE）** —— 后端推送事件 + 最小前端联调。
 
 **当前阻塞：** 无。
 
@@ -84,7 +112,7 @@
 
 | 阶段 | 前端是否要做 |
 |------|----------------|
-| eval / trace API / 新工具 | 不需要 |
+| eval / Planner 决策链 API / 新工具 | 不需要 |
 | **SSE 流式（Step 5）** | **需要** —— 至少接最小流式 UI，否则看不到生成过程 |
 | session 列表 / 完整调试面板 | 可选，不阻塞后端学习 |
 
@@ -134,8 +162,8 @@
 | HTTP API 全套 | 已完成 | 见 `docs/http-api.md` |
 | 评测 `pnpm run evals:run` | 已完成 | 见 `docs/evals-and-replay.md` |
 | 回放 `pnpm run task:replay` | 已完成 | |
-| Streaming endpoint | 未开始 | Step 5 |
-| 更完整 task trace API | 未开始 | 供调试面板逐步还原决策链 |
+| Planner 决策链 API（`GET /tasks/:taskId` → `plannerTrace[]`） | 已完成 | E.2 |
+| Streaming endpoint | 未开始 | E.3 |
 
 ---
 
@@ -228,47 +256,107 @@
 
 | | |
 |--|--|
-| **状态** | 未开始 |
+| **状态** | 已完成 |
 | **目标** | 多补 eval case，覆盖会话记忆、工具命中、失败任务、工具预算 |
-| **改动范围** | `apps/api/evals/cases/`、`apps/api/src/scripts/run-evals.ts`（如需） |
+| **改动范围** | `apps/api/evals/cases/`、`apps/api/src/scripts/run-evals.ts` |
+
+**已交付：**
+
+- 用例 4 → **8 条**（`basic-agent-cases.json`）
+- 新增：`echo-tool-smoke`、`greet-no-tools`、`blocked-localhost`、`session-memory-city`（`steps[]` 多轮同 session）
+- `run-evals.ts`：支持 `steps[]` 多轮评测、`expectedErrorCode` / `expectedTaskStatus`、启动前 DB 预检、失败时 `exitCode=1`
 
 **测试方法：**
 
 ```bash
 docker compose -f apps/api/infra/postgres/compose.yaml up -d
 pnpm run db:migrate
+pnpm run db:check
 pnpm run evals:run
 ```
 
-- 预期：`evals/reports/eval-run-*.json` 生成，失败数为 0（或新增 case 按设计应 fail）
+- 预期：终端输出 `passed: 8`、`failed: 0`；报告写入 `apps/api/evals/reports/eval-run-*.json`
+- 若**全部失败**且 `errorCode: INTERNAL_ERROR`、单条 `durationMs` < 10 → PostgreSQL 未启动，先执行上面 `docker compose` + `db:migrate`
 - 改 `PlannerAgent` / 工具后重跑，确认回归能抓住行为变化
 - 某条失败：用报告里的 `taskId` 执行 `pnpm run task:replay -- <taskId>`
 
+**学习要点：**
+
+1. **Agent 回归测的是端到端行为**，不是单个函数：工具选择、关键词、失败码都要在真实 LLM + DB 链路里验证。
+2. **eval 用例 = 预设任务 + 断言**：JSON 描述输入与期望；报告是跑完后的 pass/fail 快照。
+3. **`steps[]` 测多轮 session**：同一 `sessionId` 顺序跑多轮，只在最后一轮断言——用来验证会话记忆是否生效。
+4. **eval 脚本要 CI 友好**：启动前 DB 预检；有失败则 `exitCode = 1`，方便以后挂流水线。
+
+**代码怎么读：**
+
+| 顺序 | 文件 | 看什么 |
+|------|------|--------|
+| 1 | `apps/api/evals/cases/basic-agent-cases.json` | 8 条用例各自测什么；`input` vs `steps` |
+| 2 | `apps/api/src/scripts/run-evals.ts` | 主流程：`loadCases` → `runEvalCase` → `evaluateCase` → 写报告 |
+| 3 | 同上 `runEvalCase` | 多轮：`createSession` + 循环 `runner.run` |
+| 4 | 同上 `evaluateCase` | 断言：工具名、关键词、错误码、工具次数 |
+| 5 | `apps/api/src/runtime/task-runner.ts` | eval 实际调用的「一次任务生命周期」 |
+
+心智模型：`eval case JSON` → `run-evals.ts`（编排 + 断言）→ `TaskRunner.run` → `PlannerAgent` + tools → `eval-run-*.json` 报告。
+
 ---
 
-### E.2 Task trace API（Planner 决策链）
+### E.2 Planner 决策链 API（`plannerTrace`）
 
 | | |
 |--|--|
-| **状态** | 未开始 |
+| **状态** | 已完成 |
 | **目标** | `GET /tasks/:taskId` 能还原每一步：step、needsTool、toolName、耗时、错误 |
-| **改动范围** | `TaskRunner`、`PlannerAgent` 落库或扩展响应、`packages/api-contract` |
+| **改动范围** | `planner_steps` 表、`PlannerAgent` 落库、`GET /tasks/:taskId` 返回 `plannerTrace`、`packages/api-contract` |
+
+**命名说明：** 响应用 `plannerTrace`（Planner 决策链），**刻意不用 `trace`**，避免与 OpenTelemetry / 分布式 `traceId` 混淆。完整规则见本文件 [【H 节】命名约定](#h-命名约定)。
+
+**已交付：**
+
+- 新表 `planner_steps`（迁移 `004_planner_steps.sql`）
+- `PlannerAgent` 每轮规划循环写入一步：`needsTool`、`toolName`、`durationMs`、`outcome`、`errorCode`
+- `GET /tasks/:taskId` 响应字段 `plannerTrace[]`；`task:replay` 同步输出 `plannerTrace`
 
 **测试方法：**
 
 ```bash
+docker compose -f apps/api/infra/postgres/compose.yaml up -d
+pnpm run db:migrate
 pnpm run dev:server
-# 触发一次带工具调用的任务
+
+# 触发带工具的任务，记下 taskId
 curl -s -X POST http://localhost:3000/agent/run \
   -H 'content-type: application/json' \
-  -d '{"input":"请调用 time 工具告诉我当前时间"}' | jq .
-# 用返回的 taskId
-curl -s http://localhost:3000/tasks/<taskId> | jq .
+  -d '{"input":"请调用 time 工具告诉我当前时间，一句话回答。"}' | jq -r '.taskId'
+
+# 替换 <taskId>
+curl -s http://localhost:3000/tasks/<taskId> | jq '.plannerTrace'
 pnpm run task:replay -- <taskId>
 ```
 
-- 预期：响应含完整 messages + toolCalls；trace 字段能解释「为何调用了 time」
-- 失败：查 `tasks` / `tool_calls` 表，`pnpm run db:inspect`
+- 预期：`plannerTrace` 至少 1 步；调用了 `time` 时可见 `needsTool: true`、`toolName: "time"`、`outcome: "tool_executed"`；随后通常还有一步 `outcome: "direct_answer"`
+- `outcome` 枚举：`direct_answer` | `tool_executed` | `tool_failed` | `budget_exceeded` | `duplicate_skipped` | `fallback_answer`
+- 失败：查 `planner_steps` 表（`pnpm run db:inspect`），或对比 `tool_calls` 与 `plannerTrace` 的 `step` 是否对齐
+
+**学习要点：**
+
+1. **「任务结果」和「决策过程」是两回事**：`tool_calls` 记录工具执行；`plannerTrace`（`planner_steps`）记录模型**每一步**要不要工具、选哪个、耗时、结果类型。
+2. **`plannerTrace` ≠ 分布式 trace**：后者是 `traceId` + span 树；这里是 Agent 规划循环的决策链。
+3. **Agent 是多步规划，不是一次 LLM 调用**：典型路径 `plan` → 执行工具 → 再 `plan` → 直接回答；`plannerTrace` 常有 2 步（如 `tool_executed` + `direct_answer`）。
+4. **观测与业务分离**：在 `PlannerAgent` 循环里落库决策；HTTP 只读聚合返回 `plannerTrace[]`，不改 Agent 核心逻辑。
+
+**代码怎么读：**
+
+| 顺序 | 文件 | 看什么 |
+|------|------|--------|
+| 1 | `apps/api/infra/postgres/init/004_planner_steps.sql` | 表字段：`step`、`needs_tool`、`outcome`、`duration_ms` |
+| 2 | `apps/api/src/agents/planner-agent.ts` | 主循环；搜 `recordStep` / `recordPlannerStep` 与各 `outcome` 分支 |
+| 3 | `apps/api/src/memory/postgres-memory-store.ts` | `recordPlannerStep` / `listTaskPlannerSteps` |
+| 4 | `apps/api/src/server.ts` | `GET /tasks/:taskId` 并行返回 `plannerTrace` |
+| 5 | `packages/api-contract/src/schemas.ts` | `PlannerStepRecordSchema`、`GetTaskResponseSchema.plannerTrace` |
+| 6 | `apps/api/src/scripts/replay-task.ts` | CLI 回放是否也带 `plannerTrace` |
+
+心智模型：`llm.plan()` → 分支（direct / tool / budget / duplicate / fail）→ `recordPlannerStep` → `GET /tasks` 读 `plannerTrace`；对照 `plannerTrace[].step` ↔ `tool_calls.step`，`direct_answer` 通常无对应 tool_call。
 
 ---
 
@@ -331,7 +419,7 @@ pnpm run evals:run
 
 ```text
 P0  E.1 eval 扩展
-P1  E.2 task trace API
+P1  E.2 Planner 决策链 API（plannerTrace）
 P2  E.3 SSE（后端 + 最小前端联调）
 P3  E.4 新工具与安全
 ```
@@ -352,11 +440,67 @@ P3  E.4 新工具与安全
 
 ---
 
+## H. 命名约定
+
+新增 API 字段、数据库表、契约 schema、文档术语时**必须**遵守本节。AI / 协作者交付前自检；合并前写进契约与 `docs/http-api.md`。
+
+### 总则
+
+| 层 | 风格 | 示例 |
+|----|------|------|
+| HTTP JSON / 契约 / TS 类型 | camelCase | `plannerTrace`、`toolCalls`、`sessionId` |
+| PostgreSQL 表与列 | snake_case | `planner_steps`、`needs_tool`、`task_id` |
+| 脚本 / CLI 输出字段 | 与 HTTP 一致 | `task:replay` 的 `plannerTrace` 对齐 `GET /tasks` |
+
+**禁止**用含义过宽、且与业界惯例冲突的单词单独作字段名（尤其 `trace`），除非上下文明确指分布式链路追踪。
+
+### Agent 任务观测：三个概念分开命名
+
+同一任务下有三类数据，**不可混叫「trace」**：
+
+| 概念 | 是什么 | 正确命名（API） | 正确命名（DB） | 回答的问题 |
+|------|--------|-----------------|----------------|------------|
+| **Planner 决策链** | 每轮 `llm.plan` 要不要工具、选哪个、outcome | **`plannerTrace`** | `planner_steps` | 为什么调了 time？走了几步 plan？ |
+| **工具执行** | 工具实际 input/output、成功失败 | **`toolCalls`** | `tool_calls` | 工具跑没跑、结果是什么？ |
+| **对话时间线** | user / assistant / tool 消息 | **`messages`** | `messages` | 对话里留下了什么？ |
+
+```text
+❌ 错误：GET /tasks 返回 trace: []     → 易与 OpenTelemetry traceId 混淆
+✅ 正确：GET /tasks 返回 plannerTrace: []
+```
+
+### 分布式链路追踪（未来预留）
+
+若以后接入 OpenTelemetry / Jaeger / 结构化请求日志，使用 **`traceId`**、**`spanId`** 等业界通用名，**不要**占用 `plannerTrace` 或单独叫 `trace` 指 Agent 决策。
+
+| 场景 | 用什么 | 不要用什么 |
+|------|--------|------------|
+| Agent Planner 每步决策 | `plannerTrace` / `planner_steps` | `trace`、`decisionTrace`（未统一前勿新增同义名） |
+| HTTP/RPC 全链路 | `traceId`、`spanId`（未来） | 复用 `plannerTrace` |
+| 一次 Agent 任务主键 | `taskId`（已有） | 与 `traceId` 混为一谈 |
+
+### 新增字段自检（合并前过一遍）
+
+1. 会不会和后端同学直觉里的 **traceId / APM trace** 混淆？
+2. 会不会和已有的 `toolCalls` / `plannerTrace` / `messages` 语义重叠？
+3. 契约（`packages/api-contract`）、`server.ts`、`replay-task.ts`、注释、文档是否**同名同步**？
+4. 若引入新表，API 字段是否与表名有清晰映射（如 `planner_steps` → `plannerTrace`）？
+
+### 已落地示例（E.2）
+
+- 表：`planner_steps`（决策快照）
+- 方法：`recordPlannerStep` / `listTaskPlannerSteps`
+- API / replay / 契约：**`plannerTrace`**（不用 `trace`）
+
+细节见 `docs/http-api.md` Get Task Detail 与【E 节】E.2。
+
+---
+
 ## G. 文档索引
 
 | 文档 | 用途 |
 |------|------|
-| **本文件** | 进度与下一步（状态源） |
+| **本文件** | 进度与下一步（状态源）；【E 节】交付约定；【H 节】命名约定 |
 | `docs/fullstack-frontend-plan.md` | 前后端技术选型与 Step 设计 |
 | `docs/learning-plan.md` | 学习路线（偏个人成长） |
 | `docs/project-scaffold-plan.md` | 后端分层与 M1–M4 |

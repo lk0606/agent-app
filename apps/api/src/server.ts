@@ -113,17 +113,19 @@ async function main(): Promise<void> {
 
       if (req.method === "GET" && pathSegments[0] === "tasks" && pathSegments.length === 2) {
         const taskId = pathSegments[1];
-        const [task, messages, toolCalls] = await Promise.all([
+        const [task, messages, toolCalls, plannerTrace] = await Promise.all([
           memory.getTask(taskId),
           memory.list(taskId),
           memory.listTaskToolCalls(taskId),
+          // plannerTrace = planner_steps 决策链；toolCalls = 实际执行过的工具（非分布式 traceId）。
+          memory.listTaskPlannerSteps(taskId),
         ]);
 
         if (!task) {
           throw new AppError("NOT_FOUND", `Task "${taskId}" was not found.`);
         }
 
-        writeJson(res, HTTP_STATUS.ok, { task, messages, toolCalls });
+        writeJson(res, HTTP_STATUS.ok, { task, messages, toolCalls, plannerTrace });
         return;
       }
 

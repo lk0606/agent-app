@@ -18,7 +18,15 @@
 
 - `apps/api/evals/cases/basic-agent-cases.json`
 
-运行方式：
+运行前**必须先启动数据库**：
+
+```bash
+docker compose -f apps/api/infra/postgres/compose.yaml up -d
+pnpm run db:migrate
+pnpm run db:check
+```
+
+运行评测：
 
 ```bash
 pnpm run evals:run
@@ -26,21 +34,64 @@ pnpm run evals:run
 
 输出结果会写到：
 
-- `apps/api/evals/reports/`
+- `apps/api/evals/reports/eval-run-*.json`
 
-当前第一版支持的检查维度：
+当前支持的检查维度：
 
-- 是否调用了预期工具
-- 是否误调用了禁用工具
-- 最终回答里是否包含关键字
-- 工具调用次数是否超限
+- 是否调用了预期工具（`expectedTools`）
+- 是否误调用了禁用工具（`forbiddenTools`）
+- 最终回答里是否包含关键字（`expectedKeywords`）
+- 工具调用次数是否超限（`maxToolCalls`）
+- 任务是否按预期失败（`expectedTaskStatus` + `expectedErrorCode`）
+
+### 用例格式
+
+单轮（`input`）：
+
+```json
+{
+  "id": "time-query",
+  "input": "现在几点了？",
+  "expectedTools": ["time"],
+  "maxToolCalls": 1
+}
+```
+
+多轮同 session（`steps`，在最后一轮结果上断言）：
+
+```json
+{
+  "id": "session-memory-city",
+  "steps": [
+    "请记住：我喜欢东京。只回复收到。",
+    "我刚才说我喜欢哪座城市？请直接回答城市名。"
+  ],
+  "expectedKeywords": ["东京"],
+  "maxToolCalls": 0
+}
+```
+
+每条 case 必须有且仅有 `input` 或 `steps` 之一。
+
+### 当前 8 条用例一览
+
+| id | 测什么 |
+|----|--------|
+| `time-query` | 命中 `time` 工具 |
+| `doc-summary` | 命中 `http_fetch` + 关键词 |
+| `direct-answer` | 纯回答、不调工具 |
+| `blocked-private-host` | 拦截 `127.0.0.1` → `BAD_REQUEST` |
+| `echo-tool-smoke` | 命中 `echo` 工具 |
+| `greet-no-tools` | 简单问候、不调工具 |
+| `blocked-localhost` | 拦截 `localhost` → `BAD_REQUEST` |
+| `session-memory-city` | 多轮 session 记忆 |
 
 ## 2. Replay
 
 回放命令：
 
 ```bash
-pnpm run task:replay -- demo-task
+pnpm run task:replay -- <taskId>
 ```
 
 它会从 PostgreSQL 中拉出：
@@ -48,6 +99,7 @@ pnpm run task:replay -- demo-task
 - task 主记录
 - message 时间线
 - tool_call 明细
+- planner_steps 决策链（E.2 起；HTTP / replay 字段名 `plannerTrace`，非分布式 traceId）
 
 这一步很适合排查：
 
