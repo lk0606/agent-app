@@ -5,6 +5,7 @@ import { AgentResultSchema } from "./schemas.js";
 /** SSE 事件名（POST /agent/stream）；与 OpenTelemetry traceId 无关，见 docs/current-status.md 【H 节】 */
 export const AgentStreamEventTypeSchema = z.enum([
   "thinking",
+  "planner_decision",
   "tool_start",
   "tool_end",
   "token",
@@ -19,6 +20,14 @@ const StreamTaskRefSchema = z.object({
 export const AgentStreamThinkingEventSchema = StreamTaskRefSchema.extend({
   type: z.literal("thinking"),
   step: z.number().int().positive(),
+});
+
+export const AgentStreamPlannerDecisionEventSchema = StreamTaskRefSchema.extend({
+  type: z.literal("planner_decision"),
+  step: z.number().int().positive(),
+  needsTool: z.boolean(),
+  toolName: z.string().nullable(),
+  toolInput: z.string().nullable(),
 });
 
 export const AgentStreamToolStartEventSchema = StreamTaskRefSchema.extend({
@@ -59,6 +68,7 @@ export const AgentStreamErrorEventSchema = z.object({
 
 export const AgentStreamEventSchema = z.discriminatedUnion("type", [
   AgentStreamThinkingEventSchema,
+  AgentStreamPlannerDecisionEventSchema,
   AgentStreamToolStartEventSchema,
   AgentStreamToolEndEventSchema,
   AgentStreamTokenEventSchema,

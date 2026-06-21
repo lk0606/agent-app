@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "dotenv_config_path=.env tsx src/index.ts",
-    "dev:server": "dotenv_config_path=.env tsx src/server.ts",
+    "dev:server": "dotenv_config_path=.env tsx watch src/server.ts",
     "build": "pnpm --filter @agent-app/api-contract build && tsc -p tsconfig.json",
     "start": "dotenv_config_path=.env node dist/index.js",
     "start:server": "dotenv_config_path=.env node dist/server.js",

@@ -201,9 +201,10 @@ data: {"type":"thinking","taskId":"...","step":1}
 | type | 含义 |
 |------|------|
 | `thinking` | 开始一轮 `llm.plan` 或 `answerWithTool` |
+| `planner_decision` | Planner 在 `plan()` 后的决策：`needsTool`、`toolName`、`toolInput` |
 | `tool_start` | 即将执行工具 |
-| `tool_end` | 工具结束（`status`: succeeded / failed） |
-| `token` | 回答片段（当前为完整回答切片，非 LLM 原生流） |
+| `tool_end` | 工具结束（`status`: succeeded / failed；`toolOutput` 为完整输出） |
+| `token` | 回答片段（混元 `stream: true` 真流式 delta；未 stream 时由服务端切片 fallback） |
 | `done` | 任务成功结束，含 `sessionId`、`taskId`、`result` |
 | `error` | 任务失败，含 `code`、`message` |
 

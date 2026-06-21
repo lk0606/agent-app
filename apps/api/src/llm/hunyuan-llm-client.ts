@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 
 import { AppError } from "../shared/app-error.js";
-import type { AnswerRequest, LlmClient, PlanRequest, PlannerDecision, SessionSummaryRequest } from "./llm-client.js";
+import type { AnswerRequest, LlmClient, LlmStreamOptions, PlanRequest, PlannerDecision, SessionSummaryRequest } from "./llm-client.js";
 
 export class HunyuanLlmClient implements LlmClient {
   private readonly client: OpenAI;
@@ -80,31 +80,54 @@ export class HunyuanLlmClient implements LlmClient {
     }
   }
 
-  // 工具执行后再让模型组织自然语言，避免把原始工具输出直接暴露给用户。
-  async answerWithTool(input: AnswerRequest): Promise<string> {
+  // 工具执行后再让模型组织自然语言；stream: true 时通过 onToken 逐 delta 推送。
+  async answerWithTool(input: AnswerRequest, options?: LlmStreamOptions): Promise<string> {
     try {
+      const messages = [
+        {
+          role: "system" as const,
+          content: [
+            "You are a helpful Node agent.",
+            "Use the tool result to answer naturally and directly.",
+            "Do not mention internal planning unless the user asks.",
+          ].join(" "),
+        },
+        {
+          role: "user" as const,
+          content: [
+            this.buildConversationHistory(input.conversationHistory, input.sessionSummary),
+            `User input: ${input.userInput}`,
+            `Tool used: ${input.toolName}`,
+            `Tool input: ${input.toolInput}`,
+            `Tool output:\n${input.toolOutput}`,
+          ].join("\n\n"),
+        },
+      ];
+
+      if (options?.onToken) {
+        const stream = await this.client.chat.completions.create({
+          model: this.options.model,
+          messages,
+          stream: true,
+        });
+
+        let answer = "";
+
+        for await (const chunk of stream) {
+          const delta = chunk.choices[0]?.delta?.content;
+
+          if (typeof delta === "string" && delta.length > 0) {
+            answer += delta;
+            options.onToken(delta);
+          }
+        }
+
+        return answer.length > 0 ? answer : "The model returned an empty response.";
+      }
+
       const completion = await this.client.chat.completions.create({
         model: this.options.model,
-        messages: [
-          {
-            role: "system",
-            content: [
-              "You are a helpful Node agent.",
-              "Use the tool result to answer naturally and directly.",
-              "Do not mention internal planning unless the user asks.",
-            ].join(" "),
-          },
-          {
-            role: "user",
-            content: [
-              this.buildConversationHistory(input.conversationHistory, input.sessionSummary),
-              `User input: ${input.userInput}`,
-              `Tool used: ${input.toolName}`,
-              `Tool input: ${input.toolInput}`,
-              `Tool output:\n${input.toolOutput}`,
-            ].join("\n\n"),
-          },
-        ],
+        messages,
       });
 
       const message = completion.choices[0]?.message;

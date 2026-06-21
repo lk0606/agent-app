@@ -79,3 +79,53 @@ textarea {
   background: var(--accent);
   color: var(--accent-foreground);
 }
+
+.prose-agent {
+  color: inherit;
+  line-height: 1.65;
+}
+
+.prose-agent > :first-child {
+  margin-top: 0;
+}
+
+.prose-agent > :last-child {
+  margin-bottom: 0;
+}
+
+.prose-agent p,
+.prose-agent ul,
+.prose-agent ol,
+.prose-agent pre,
+.prose-agent blockquote {
+  margin: 0.65em 0;
+}
+
+.prose-agent ul,
+.prose-agent ol {
+  padding-left: 1.25rem;
+}
+
+.prose-agent li + li {
+  margin-top: 0.25em;
+}
+
+.prose-agent a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.prose-agent blockquote {
+  border-left: 3px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  padding-left: 0.85rem;
+  color: var(--muted-foreground);
+}
+
+.prose-agent h1,
+.prose-agent h2,
+.prose-agent h3 {
+  margin: 0.85em 0 0.35em;
+  font-size: 1em;
+  font-weight: 650;
+}

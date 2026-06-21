@@ -85,6 +85,28 @@ export const chatMessages = {
       "en-US": "Needs retry",
     },
   },
+  timeline: {
+    thinking: {
+      "zh-CN": "第 {step} 步：规划中...",
+      "en-US": "Step {step}: planning...",
+    },
+    plannerDecision: {
+      "zh-CN": "第 {step} 步：Planner 决策",
+      "en-US": "Step {step}: planner decision",
+    },
+    willCallTool: {
+      "zh-CN": "将调用工具 {tool}",
+      "en-US": "Will call tool {tool}",
+    },
+    willAnswerDirectly: {
+      "zh-CN": "无需工具，直接生成回答",
+      "en-US": "No tool needed, answering directly",
+    },
+    toolFailed: {
+      "zh-CN": "工具执行失败",
+      "en-US": "Tool execution failed",
+    },
+  },
   empty: {
     title: {
       "zh-CN": "开始一轮真实 Agent 调试",

@@ -46,8 +46,13 @@ export interface SessionSummaryRequest {
   currentUserInput: string;
 }
 
+export interface LlmStreamOptions {
+  /** POST /agent/stream 注入：混元 stream: true 时按 delta 回调 */
+  onToken?: (delta: string) => void;
+}
+
 export interface LlmClient {
   plan(input: PlanRequest): Promise<PlannerDecision>;
-  answerWithTool(input: AnswerRequest): Promise<string>;
+  answerWithTool(input: AnswerRequest, options?: LlmStreamOptions): Promise<string>;
   summarizeSession(input: SessionSummaryRequest): Promise<string>;
 }

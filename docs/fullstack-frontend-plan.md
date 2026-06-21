@@ -530,7 +530,7 @@ agent-workbench.tsx    # 编排：用户消息 + RunTimeline
 - 契约：`packages/api-contract/src/stream-events.ts` 扩展
 - 不引入 Vercel AI SDK 作为 P0（可后续评估）；先用自有 SSE 协议
 
-状态：**部分完成**（E.3 通路已验收；**E.3.5 未开始**）
+状态：**已完成**（E.3 通路 + E.3.5 RunTimeline / MD / 动画）
 
 ## 7. 第一阶段安装建议
 
@@ -568,7 +568,7 @@ pnpm add lucide-react zod clsx tailwind-merge next-themes next-intl
 - `apps/web` 新增 Next.js 前端
 - 后端之后迁移到 `apps/api`
 - 共享契约放 `packages/api-contract`
-- Chat 默认走 **`POST /agent/stream`**；完整体验按 **E.3.5**（RunTimeline + MD + 动画）推进
+- Chat 默认走 **`POST /agent/stream`**；RunTimeline + MD + 动画已按 **E.3.5** 交付
 - UI 选择 Tailwind + shadcn/ui + Radix + lucide-react
 - 主题选择 CSS variables + next-themes
 - 国际化选择 Next.js `[locale]` 路由 + next-intl

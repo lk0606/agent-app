@@ -16,40 +16,33 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { streamAgent } from "@/lib/api/agent-api";
 
-type MessageStatus = "sending" | "sent" | "failed" | "thinking" | "streaming";
-
-type StreamToolState = {
-  toolName: string;
-  toolInput: string;
-  status: "running" | "succeeded" | "failed";
-  output?: string | null;
-  errorMessage?: string | null;
-};
-
-type ChatMessage = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  replyToMessageId?: string;
-  status?: MessageStatus;
-  error?: string;
-  toolCalls?: AgentToolCall[];
-};
+import { applyStreamEvent, finalizeAnswerStep } from "./apply-stream-event";
+import { RunTimeline } from "./run-timeline";
+import {
+  createAssistantRun,
+  isAssistantRun,
+  type AssistantRunMessage,
+  type ChatItem,
+  type UserChatMessage,
+} from "./run-types";
 
 export function AgentWorkbench() {
   const t = useTranslations("chat");
   const common = useTranslations("common");
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatItem[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
-  const [streamTool, setStreamTool] = useState<StreamToolState | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const latestRun = [...messages].reverse().find(isAssistantRun);
+  const latestToolCalls = extractToolCalls(latestRun);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
@@ -80,6 +73,17 @@ export function AgentWorkbench() {
     void submitInput();
   }
 
+  function patchAssistantRun(
+    assistantMessageId: string,
+    updater: (run: AssistantRunMessage) => AssistantRunMessage,
+  ) {
+    setMessages((current) =>
+      current.map((item) =>
+        isAssistantRun(item) && item.id === assistantMessageId ? updater(item) : item,
+      ),
+    );
+  }
+
   async function sendMessage(content: string, existingMessageId?: string) {
     const messageId = existingMessageId ?? crypto.randomUUID();
     const assistantMessageId = `${messageId}-assistant`;
@@ -88,13 +92,13 @@ export function AgentWorkbench() {
       if (existingMessageId) {
         return [
           ...current
-            .filter((message) => message.replyToMessageId !== existingMessageId)
-            .map((message) =>
-              message.id === existingMessageId
-                ? { ...message, error: undefined, status: "sending" as const }
-                : message,
+            .filter((item) => !(isAssistantRun(item) && item.replyToMessageId === existingMessageId))
+            .map((item) =>
+              !isAssistantRun(item) && item.id === existingMessageId
+                ? { ...item, error: undefined, status: "sending" as const }
+                : item,
             ),
-          createThinkingMessage(assistantMessageId, existingMessageId, t("status.thinking")),
+          createAssistantRun(assistantMessageId, existingMessageId),
         ];
       }
 
@@ -105,119 +109,55 @@ export function AgentWorkbench() {
           role: "user",
           content,
           status: "sending",
-        },
-        createThinkingMessage(assistantMessageId, messageId, t("status.thinking")),
+        } satisfies UserChatMessage,
+        createAssistantRun(assistantMessageId, messageId),
       ];
     });
     setIsRunning(true);
-    setStreamTool(null);
 
     try {
-      let streamedContent = "";
-      let streamedToolCalls: AgentToolCall[] = [];
-      let pendingToolInput = "";
-
       await streamAgent(
         {
           input: content,
           ...(sessionId ? { sessionId } : {}),
         },
         (event) => {
-          switch (event.type) {
-            case "thinking":
-              setMessages((current) =>
-                current.map((message) =>
-                  message.id === assistantMessageId
-                    ? {
-                        ...message,
-                        content: t("status.thinking"),
-                        status: "thinking" as const,
-                      }
-                    : message,
-                ),
-              );
-              return;
-            case "tool_start":
-              pendingToolInput = event.toolInput;
-              setStreamTool({
-                toolName: event.toolName,
-                toolInput: event.toolInput,
-                status: "running",
-              });
-              setMessages((current) =>
-                current.map((message) =>
-                  message.id === assistantMessageId
-                    ? {
-                        ...message,
-                        content: `${t("status.toolRunning")}: ${event.toolName}`,
-                        status: "thinking" as const,
-                      }
-                    : message,
-                ),
-              );
-              return;
-            case "tool_end":
-              setStreamTool((current) => ({
-                toolName: event.toolName,
-                toolInput: current?.toolInput ?? pendingToolInput,
-                status: event.status,
-                output: event.toolOutput ?? null,
-                errorMessage: event.errorMessage ?? null,
-              }));
+          const applyEvent = () => {
+            switch (event.type) {
+              case "thinking":
+              case "planner_decision":
+              case "tool_start":
+              case "tool_end":
+              case "token":
+                patchAssistantRun(assistantMessageId, (run) => ({
+                  ...run,
+                  steps: applyStreamEvent(run.steps, event),
+                }));
+                return;
+              case "done":
+                setSessionId(event.sessionId);
+                setTaskId(event.taskId);
+                patchAssistantRun(assistantMessageId, (run) => ({
+                  ...run,
+                  id: event.taskId,
+                  taskId: event.taskId,
+                  status: "done",
+                  steps: finalizeAnswerStep(run.steps, event.result.summary),
+                }));
+                setMessages((current) =>
+                  current.map((item) =>
+                    !isAssistantRun(item) && item.id === messageId
+                      ? { ...item, error: undefined, status: "sent" as const }
+                      : item,
+                  ),
+                );
+                return;
+              case "error":
+                throw new Error(event.message);
+            }
+          };
 
-              if (event.status === "succeeded" && event.toolOutput) {
-                streamedToolCalls = [
-                  ...streamedToolCalls.filter((item) => item.toolName !== event.toolName),
-                  {
-                    toolName: event.toolName,
-                    input: pendingToolInput,
-                    output: event.toolOutput,
-                  },
-                ];
-              }
-              return;
-            case "token":
-              streamedContent += event.delta;
-              setMessages((current) =>
-                current.map((message) =>
-                  message.id === assistantMessageId
-                    ? {
-                        ...message,
-                        content: streamedContent,
-                        status: "streaming" as const,
-                        toolCalls: streamedToolCalls,
-                      }
-                    : message,
-                ),
-              );
-              return;
-            case "done":
-              setSessionId(event.sessionId);
-              setTaskId(event.taskId);
-              setStreamTool(null);
-              setMessages((current) =>
-                current.map((message) => {
-                  if (message.id === messageId) {
-                    return { ...message, error: undefined, status: "sent" as const };
-                  }
-
-                  if (message.id === assistantMessageId) {
-                    return {
-                      ...message,
-                      id: event.taskId,
-                      content: event.result.summary,
-                      status: "sent" as const,
-                      toolCalls: event.result.toolCalls,
-                    };
-                  }
-
-                  return message;
-                }),
-              );
-              return;
-            case "error":
-              throw new Error(event.message);
-          }
+          flushSync(applyEvent);
         },
       );
     } catch (requestError) {
@@ -225,16 +165,18 @@ export function AgentWorkbench() {
 
       setMessages((current) =>
         current
-          .filter((chatMessage) => chatMessage.id !== assistantMessageId)
-          .map((chatMessage) =>
-            chatMessage.id === messageId
-              ? {
-                  ...chatMessage,
-                  error: message,
-                  status: "failed",
-                }
-              : chatMessage,
-          ),
+          .map((item) => {
+            if (isAssistantRun(item) && item.id === assistantMessageId) {
+              return { ...item, status: "failed" as const, error: message };
+            }
+
+            if (!isAssistantRun(item) && item.id === messageId) {
+              return { ...item, error: message, status: "failed" as const };
+            }
+
+            return item;
+          })
+          .filter((item) => !(isAssistantRun(item) && item.status === "failed" && item.steps.length === 0)),
       );
     } finally {
       setIsRunning(false);
@@ -253,9 +195,14 @@ export function AgentWorkbench() {
     return t("errors.requestFailed");
   }
 
-  const latestToolCalls = [...messages].reverse().find((message) => message.toolCalls?.length)?.toolCalls ?? [];
-  const failedCount = messages.filter((message) => message.status === "failed").length;
-  const statusLabel = isRunning ? common("status.running") : failedCount > 0 ? t("status.needsRetry") : common("status.ready");
+  const failedCount = messages.filter(
+    (item) => !isAssistantRun(item) && item.status === "failed",
+  ).length;
+  const statusLabel = isRunning
+    ? common("status.running")
+    : failedCount > 0
+      ? t("status.needsRetry")
+      : common("status.ready");
 
   return (
     <main className="relative h-dvh overflow-hidden bg-background text-foreground">
@@ -317,20 +264,22 @@ export function AgentWorkbench() {
                 <EmptyState />
               ) : (
                 <div className="space-y-5">
-                  {messages.map((message) => (
-                    <MessageRow
-                      isRunning={isRunning}
-                      key={message.id}
-                      message={message}
-                      retryLabel={t("composer.retry")}
-                      sendingLabel={t("status.sending")}
-                      thinkingLabel={t("status.thinking")}
-                      streamingLabel={t("status.streaming")}
-                      onRetry={(failedMessage) => {
-                        void sendMessage(failedMessage.content, failedMessage.id);
-                      }}
-                    />
-                  ))}
+                  {messages.map((message) =>
+                    isAssistantRun(message) ? (
+                      <AssistantRunRow isRunning={isRunning} key={message.id} run={message} />
+                    ) : (
+                      <UserMessageRow
+                        isRunning={isRunning}
+                        key={message.id}
+                        message={message}
+                        retryLabel={t("composer.retry")}
+                        sendingLabel={t("status.sending")}
+                        onRetry={(failedMessage) => {
+                          void sendMessage(failedMessage.content, failedMessage.id);
+                        }}
+                      />
+                    ),
+                  )}
                   <div ref={messagesEndRef} />
                 </div>
               )}
@@ -370,15 +319,22 @@ export function AgentWorkbench() {
               <DebugField label={t("panels.task")} value={taskId ?? "-"} />
               <section className="rounded-[1.25rem] border border-border/80 bg-panel/85 p-3">
                 <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                  <Loader2 className={`h-3.5 w-3.5 ${streamTool?.status === "running" ? "animate-spin text-accent" : ""}`} />
+                  <Loader2
+                    className={`h-3.5 w-3.5 ${latestRun?.steps.some((step) => step.kind === "tool" && step.status === "running") ? "animate-spin text-accent" : ""}`}
+                  />
                   {t("status.toolRunning")}
                 </div>
-                {streamTool ? (
+                {latestRun?.steps.find((step) => step.kind === "tool") ? (
                   <div className="space-y-1 font-mono text-xs text-muted-foreground">
-                    <p>{streamTool.toolName}</p>
-                    <p className="break-all">input: {streamTool.toolInput || "-"}</p>
-                    <p>{streamTool.status}</p>
-                    {streamTool.output ? <p className="line-clamp-3 break-all">output: {streamTool.output}</p> : null}
+                    {latestRun.steps
+                      .filter((step) => step.kind === "tool")
+                      .map((step) => (
+                        <div className="break-all" key={step.id}>
+                          <p>{step.toolName}</p>
+                          <p>input: {step.toolInput || "-"}</p>
+                          <p>{step.status}</p>
+                        </div>
+                      ))}
                   </div>
                 ) : (
                   <p className="text-sm text-muted-foreground">-</p>
@@ -403,6 +359,20 @@ export function AgentWorkbench() {
   );
 }
 
+function extractToolCalls(run: AssistantRunMessage | undefined): AgentToolCall[] {
+  if (!run) {
+    return [];
+  }
+
+  return run.steps
+    .filter((step): step is Extract<typeof step, { kind: "tool" }> => step.kind === "tool" && step.status === "succeeded")
+    .map((step) => ({
+      toolName: step.toolName,
+      input: step.toolInput,
+      output: step.output ?? "",
+    }));
+}
+
 function EmptyState() {
   const t = useTranslations("chat");
 
@@ -419,33 +389,25 @@ function EmptyState() {
   );
 }
 
-function MessageRow({
+function UserMessageRow({
   isRunning,
   message,
   retryLabel,
   sendingLabel,
-  thinkingLabel,
-  streamingLabel,
   onRetry,
 }: {
   isRunning: boolean;
-  message: ChatMessage;
+  message: UserChatMessage;
   retryLabel: string;
   sendingLabel: string;
-  thinkingLabel: string;
-  streamingLabel: string;
-  onRetry: (message: ChatMessage) => void;
+  onRetry: (message: UserChatMessage) => void;
 }) {
-  const isUser = message.role === "user";
   const isFailed = message.status === "failed";
   const isSending = message.status === "sending";
-  const isThinking = message.status === "thinking";
-  const isStreaming = message.status === "streaming";
 
   return (
-    <article className={`flex items-start gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
-      {!isUser ? <Avatar icon={<Bot className="h-4 w-4" />} tone="assistant" /> : null}
-      {isUser && isFailed ? (
+    <article className="flex items-start justify-end gap-3">
+      {isFailed ? (
         <button
           aria-label={retryLabel}
           className="mt-2 inline-flex h-9 w-9 items-center justify-center rounded-full border border-danger/30 bg-danger-soft text-danger shadow-sm transition hover:scale-105 disabled:cursor-not-allowed disabled:opacity-50"
@@ -456,14 +418,12 @@ function MessageRow({
           <AlertCircle className="h-4 w-4" />
         </button>
       ) : null}
-      <div className={`flex max-w-[85%] flex-col gap-2 sm:max-w-[760px] ${isUser ? "items-end" : "items-start"}`}>
+      <div className="flex max-w-[85%] flex-col items-end gap-2 sm:max-w-[760px]">
         <div
           className={`rounded-[1.35rem] border px-4 py-3 text-sm leading-6 shadow-sm ${
-            isUser
-              ? isFailed
-                ? "border-danger/30 bg-danger-soft text-foreground"
-                : "border-transparent bg-accent text-accent-foreground shadow-[0_18px_38px_rgba(15,118,110,0.2)]"
-              : "border-border/80 bg-panel/95"
+            isFailed
+              ? "border-danger/30 bg-danger-soft text-foreground"
+              : "border-transparent bg-accent text-accent-foreground shadow-[0_18px_38px_rgba(15,118,110,0.2)]"
           }`}
         >
           <p className="whitespace-pre-wrap">{message.content}</p>
@@ -471,18 +431,6 @@ function MessageRow({
             <div className="mt-3 flex items-center gap-2 text-xs opacity-80">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               <span>{sendingLabel}</span>
-            </div>
-          ) : null}
-          {isThinking ? (
-            <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
-              <span>{thinkingLabel}</span>
-            </div>
-          ) : null}
-          {isStreaming ? (
-            <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
-              <span>{streamingLabel}</span>
             </div>
           ) : null}
           {isFailed ? (
@@ -499,22 +447,27 @@ function MessageRow({
               </button>
             </div>
           ) : null}
-          {message.toolCalls && message.toolCalls.length > 0 ? <ToolCallList toolCalls={message.toolCalls} /> : null}
         </div>
       </div>
-      {isUser ? <Avatar icon={<User className="h-4 w-4" />} tone="user" /> : null}
+      <Avatar icon={<User className="h-4 w-4" />} tone="user" />
     </article>
   );
 }
 
-function createThinkingMessage(id: string, replyToMessageId: string, content: string): ChatMessage {
-  return {
-    id,
-    role: "assistant",
-    content,
-    replyToMessageId,
-    status: "thinking",
-  };
+function AssistantRunRow({ run, isRunning }: { run: AssistantRunMessage; isRunning: boolean }) {
+  return (
+    <article className="flex items-start gap-3">
+      <Avatar icon={<Bot className="h-4 w-4" />} tone="assistant" />
+      <div className="min-w-0 flex-1 max-w-[920px]">
+        <RunTimeline run={run} />
+        {run.status === "failed" && !isRunning ? (
+          <div className="mt-3 rounded-xl border border-danger/25 bg-danger-soft/50 p-3 text-sm text-danger">
+            {run.error}
+          </div>
+        ) : null}
+      </div>
+    </article>
+  );
 }
 
 function Avatar({ icon, tone }: { icon: ReactNode; tone: "assistant" | "user" }) {

@@ -1,5 +1,9 @@
 import type { RecordPlannerStepInput } from "../memory/memory-store.js";
-import { emitThinking, emitTokenStream } from "../runtime/agent-stream.js";
+import {
+  createTokenHandler,
+  emitPlannerDecision,
+  emitTokenStream,
+} from "../runtime/agent-stream.js";
 import { AppError } from "../shared/app-error.js";
 import type { Agent, AgentContext, AgentRequest, AgentResponse } from "./base-agent.js";
 
@@ -25,14 +29,14 @@ export class PlannerAgent implements Agent {
       : { recentHistory: [] as LlmConversationMessage[], sessionSummary: null as string | null };
     const toolCalls: AgentResponse["toolCalls"] = [];
     let finalAnswer = "";
+    const streamedFlag = { value: false };
 
     for (let step = 0; step < this.options.maxSteps; step += 1) {
       const stepNumber = step + 1;
       const stepStartedAt = Date.now();
       const stepCreatedAt = new Date(stepStartedAt).toISOString();
 
-      emitThinking(context.emitStream, request.taskId, stepNumber);
-
+      // plan() 期间 UI 只显示通用 loading；决策内容在 planner_decision 事件里展示。
       const decision = await context.llm.plan({
         sessionSummary: sessionContext.sessionSummary,
         conversationHistory: sessionContext.recentHistory,
@@ -47,6 +51,8 @@ export class PlannerAgent implements Agent {
           toolOutput: call.output,
         })),
       });
+
+      emitPlannerDecision(context.emitStream, request.taskId, stepNumber, decision);
 
       context.logger.info("Planner step decided", {
         step: stepNumber,
@@ -65,6 +71,19 @@ export class PlannerAgent implements Agent {
       };
 
       if (!decision.needsTool || !decision.toolName) {
+        // 已有工具结果时走 answerWithTool 真流式，而不是 plan() 返回的 draftAnswer。
+        if (toolCalls.length > 0) {
+          finalAnswer = await this.answerFromToolResult(
+            context,
+            request,
+            sessionContext,
+            toolCalls[toolCalls.length - 1]!,
+            streamedFlag,
+          );
+        } else {
+          finalAnswer = decision.draftAnswer;
+        }
+
         await recordStep({
           needsTool: decision.needsTool,
           toolName: decision.toolName ?? null,
@@ -74,7 +93,6 @@ export class PlannerAgent implements Agent {
           finishedAt: new Date().toISOString(),
         });
 
-        finalAnswer = decision.draftAnswer;
         break;
       }
 
@@ -87,16 +105,7 @@ export class PlannerAgent implements Agent {
         const lastCall = toolCalls[toolCalls.length - 1];
 
         if (lastCall) {
-          emitThinking(context.emitStream, request.taskId, stepNumber);
-
-          finalAnswer = await context.llm.answerWithTool({
-            sessionSummary: sessionContext.sessionSummary,
-            conversationHistory: sessionContext.recentHistory,
-            userInput: request.input,
-            toolName: lastCall.toolName,
-            toolInput: lastCall.input,
-            toolOutput: lastCall.output,
-          });
+          finalAnswer = await this.answerFromToolResult(context, request, sessionContext, lastCall, streamedFlag);
 
           await recordStep({
             needsTool: true,
@@ -126,16 +135,7 @@ export class PlannerAgent implements Agent {
           toolInput,
         });
 
-        emitThinking(context.emitStream, request.taskId, stepNumber);
-
-        finalAnswer = await context.llm.answerWithTool({
-          sessionSummary: sessionContext.sessionSummary,
-          conversationHistory: sessionContext.recentHistory,
-          userInput: request.input,
-          toolName: existingCall.toolName,
-          toolInput: existingCall.input,
-          toolOutput: existingCall.output,
-        });
+        finalAnswer = await this.answerFromToolResult(context, request, sessionContext, existingCall, streamedFlag);
 
         await recordStep({
           needsTool: true,
@@ -204,7 +204,7 @@ export class PlannerAgent implements Agent {
           step: stepNumber,
           toolName: tool.name,
           status: "succeeded",
-          toolOutput: toolOutput.slice(0, 240),
+          toolOutput,
         });
 
         await recordStep({
@@ -215,6 +215,16 @@ export class PlannerAgent implements Agent {
           durationMs: Date.now() - stepStartedAt,
           finishedAt: new Date().toISOString(),
         });
+
+        // 单工具任务（eval 基线均为 maxToolCalls=1）：工具成功后直接流式生成回答，跳过第二轮 plan。
+        finalAnswer = await this.answerFromToolResult(
+          context,
+          request,
+          sessionContext,
+          { toolName: tool.name, input: toolInput, output: toolOutput },
+          streamedFlag,
+        );
+        break;
       } catch (error: unknown) {
         const errorCode = error instanceof AppError ? error.code : "TOOL_ERROR";
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -267,16 +277,7 @@ export class PlannerAgent implements Agent {
       const fallbackCreatedAt = new Date(fallbackStartedAt).toISOString();
       const fallbackStep = toolCalls.length + 1;
 
-      emitThinking(context.emitStream, request.taskId, fallbackStep);
-
-      finalAnswer = await context.llm.answerWithTool({
-        sessionSummary: sessionContext.sessionSummary,
-        conversationHistory: sessionContext.recentHistory,
-        userInput: request.input,
-        toolName: lastCall.toolName,
-        toolInput: lastCall.input,
-        toolOutput: lastCall.output,
-      });
+      finalAnswer = await this.answerFromToolResult(context, request, sessionContext, lastCall, streamedFlag);
 
       await context.memory.recordPlannerStep({
         // 循环因 maxSteps 结束且尚无 finalAnswer 时，用最后一次工具结果强行生成回答。
@@ -292,8 +293,9 @@ export class PlannerAgent implements Agent {
       });
     }
 
-    if (context.emitStream) {
-      emitTokenStream(context.emitStream, request.taskId, finalAnswer);
+    if (context.emitStream && !streamedFlag.value && finalAnswer) {
+      // plan() 直接返回 draftAnswer 时 LLM 未走 stream，用切片 fallback。
+      await emitTokenStream(context.emitStream, request.taskId, finalAnswer);
     }
 
     await context.memory.append(request.taskId, {
@@ -306,6 +308,28 @@ export class PlannerAgent implements Agent {
       summary: finalAnswer,
       toolCalls,
     };
+  }
+
+  private async answerFromToolResult(
+    context: AgentContext,
+    request: AgentRequest,
+    sessionContext: { sessionSummary: string | null; recentHistory: LlmConversationMessage[] },
+    toolCall: { toolName: string; input: string; output: string },
+    streamedFlag: { value: boolean },
+  ): Promise<string> {
+    return context.llm.answerWithTool(
+      {
+        sessionSummary: sessionContext.sessionSummary,
+        conversationHistory: sessionContext.recentHistory,
+        userInput: request.input,
+        toolName: toolCall.toolName,
+        toolInput: toolCall.input,
+        toolOutput: toolCall.output,
+      },
+      {
+        onToken: createTokenHandler(context.emitStream, request.taskId, streamedFlag),
+      },
+    );
   }
 
   // 组装喂给模型的会话上下文：旧内容走持久化摘要，最近内容保留原文。
