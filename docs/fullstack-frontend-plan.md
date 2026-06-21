@@ -20,12 +20,12 @@
 - 持久化 session summary：`summary`、`summary_message_count`、`summary_updated_at`
 - 共享 API contract：`packages/api-contract`
 - 评测与回放：`evals:run`、`task:replay`
-- HTTP API：`POST /agent/run`、`GET /sessions`、`GET /sessions/:sessionId`、`GET /sessions/:sessionId/messages`、`GET /tasks/:taskId`、`PATCH /sessions/:sessionId/archive`
+- HTTP API：`POST /agent/run`、**`POST /agent/stream`（SSE）**、`GET /sessions`、`GET /sessions/:sessionId`、`GET /sessions/:sessionId/messages`、`GET /tasks/:taskId`（含 **`plannerTrace`**）、`PATCH /sessions/:sessionId/archive`
 
 当前后端后续：
 
-- 增加 streaming endpoint，让前端可以展示模型生成中、工具调用中、工具完成等实时状态
-- 增加更完整的 Planner 决策链（`plannerTrace`），方便前端调试面板还原每一步决策
+- **E.3.5**：混元真 streaming、`planner_decision` SSE 事件、SSE flush（见 `docs/current-status.md` E.3.5）
+- E.4：新工具 + eval 安全 case
 
 ## 2. 是否前后端放一个仓库
 
@@ -478,17 +478,59 @@ export default async function LocaleLayout({ children, params }) {
 
 状态：**部分完成** — sessionId/taskId/toolCalls 已有；timeline、summary、task error 待补；详见 `docs/current-status.md` §C Step 4
 
-### Step 5：流式响应
+### Step 5：流式响应（E.3 通路 + E.3.5 完整体验）
 
-- 后端增加 SSE 或 AI SDK stream-compatible endpoint
-- 前端从一次性返回升级成流式显示
-- 工具调用状态实时出现在 UI 上
+**状态源：** `docs/current-status.md` 【C 节 Step 5】、【E 节 E.3 / E.3.5】。
 
-验收：
+#### E.3 已完成（通路）
 
-- 用户能看到模型生成中、工具调用中、工具完成、最终回答
+- 后端 `POST /agent/stream`（SSE：`thinking` / `tool_start` / `tool_end` / `token` / `done` / `error`）
+- 前端 `streamAgent` + 最小单气泡 UI
 
-状态：**未开始** — 详见 `docs/current-status.md` §C Step 5
+#### E.3.5 计划（Cursor 式 — 当前优先）
+
+Agent 运行过程是**核心交互**，目标对齐 Cursor：知道正在做什么、调了什么工具、结果如何、回答如何流式呈现。
+
+**后端（E.3.5-a / b）**
+
+- 混元 `chat.completions.create({ stream: true })`，**真** `token` 推送（取代整段回答切片）
+- 新增 SSE 事件 **`planner_decision`**：`step`、`needsTool`、`toolName`、`toolInput`
+- SSE 写帧后及时 flush（避免事件堆在一帧）
+- `emitTokenStream` 仅作无 stream API 时的 fallback
+
+**前端（E.3.5-c / d / e）**
+
+| 能力 | 方案 |
+|------|------|
+| **RunTimeline** | 一次 run = 时间线：规划 → 工具卡片 → 回答；替代单气泡 morphing |
+| **工具卡片** | running / succeeded / failed；展示 input + output（可折叠）；inline 于对话流 |
+| **Markdown** | `react-markdown` + `remark-gfm`；流式增长的 content 整段 re-parse |
+| **动画** | 步骤入场、running 指示、完成/失败过渡、streaming 光标；Tailwind + 可选 `framer-motion`（仅 Timeline） |
+| **可选 P1** | 代码高亮、复制按钮、`rehype-highlight` |
+
+**组件规划（`apps/web/src/features/chat/`）**
+
+```text
+run-timeline.tsx       # 按 SSE 事件渲染步骤列表
+tool-step-card.tsx     # 单工具步骤（running / done / error）
+markdown-message.tsx   # 流式/最终回答 MD 渲染
+agent-workbench.tsx    # 编排：用户消息 + RunTimeline
+```
+
+**验收**
+
+- 调 `time`：时间线顺序可见「规划 → 调 time → output → 流式 MD 回答」
+- 回答逐字/逐段可见（非一次性跳满）
+- MD 列表、代码块、链接正常渲染
+- 工具失败 inline 展示错误
+- 跑完后仍可用 `taskId` + `plannerTrace` 调试
+
+**依赖**
+
+- 契约：`packages/api-contract/src/stream-events.ts` 扩展
+- 不引入 Vercel AI SDK 作为 P0（可后续评估）；先用自有 SSE 协议
+
+状态：**部分完成**（E.3 通路已验收；**E.3.5 未开始**）
 
 ## 7. 第一阶段安装建议
 
@@ -526,7 +568,7 @@ pnpm add lucide-react zod clsx tailwind-merge next-themes next-intl
 - `apps/web` 新增 Next.js 前端
 - 后端之后迁移到 `apps/api`
 - 共享契约放 `packages/api-contract`
-- 第一版先做普通请求，不急着 streaming
+- Chat 默认走 **`POST /agent/stream`**；完整体验按 **E.3.5**（RunTimeline + MD + 动画）推进
 - UI 选择 Tailwind + shadcn/ui + Radix + lucide-react
 - 主题选择 CSS variables + next-themes
 - 国际化选择 Next.js `[locale]` 路由 + next-intl

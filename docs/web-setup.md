@@ -97,6 +97,6 @@ pnpm run check:all
 
 ## 当前边界
 
-Chat 已默认走 **`POST /agent/stream` SSE**（thinking / 工具态 / token 逐段）。`/agent/run` 仍可用于 curl 一次性 JSON。
+Chat 已默认走 **`POST /agent/stream` SSE**（E.3 最小 UI）。**E.3.5** 计划：RunTimeline + 真 streaming + Markdown + 动画，见 `docs/current-status.md` E.3.5。
 
 `shadcn/ui` 暂时没有通过 CLI 初始化。当前页面先用 Tailwind 和少量业务组件跑通闭环；等按钮、输入框、弹窗、侧栏开始多处复用时，再把 `components/ui` 作为稳定基础组件层引入。
