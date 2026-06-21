@@ -3,7 +3,7 @@
     "id": "time-query",
     "input": "现在几点了？请直接回答，并在需要时调用工具。",
     "expectedTools": ["time"],
-    "forbiddenTools": ["http_fetch"],
+    "forbiddenTools": ["http_fetch", "read_file"],
     "maxToolCalls": 1
   },
   {
@@ -16,7 +16,7 @@
   {
     "id": "direct-answer",
     "input": "请用一句话解释什么是 TypeScript。",
-    "forbiddenTools": ["time", "http_fetch", "echo"],
+    "forbiddenTools": ["time", "http_fetch", "echo", "read_file"],
     "expectedKeywords": ["JavaScript", "类型"],
     "maxToolCalls": 0
   },
@@ -31,13 +31,13 @@
     "id": "echo-tool-smoke",
     "input": "请调用 echo 工具，把下面这句话原文复述一遍：eval-smoke-ok",
     "expectedTools": ["echo"],
-    "forbiddenTools": ["http_fetch"],
+    "forbiddenTools": ["http_fetch", "read_file"],
     "maxToolCalls": 1
   },
   {
     "id": "greet-no-tools",
     "input": "你好，请只回复「收到」，不要调用任何工具。",
-    "forbiddenTools": ["time", "http_fetch", "echo"],
+    "forbiddenTools": ["time", "http_fetch", "echo", "read_file"],
     "expectedKeywords": ["收到"],
     "maxToolCalls": 0
   },
@@ -54,8 +54,32 @@
       "请记住：我喜欢东京。只回复收到。",
       "我刚才说我喜欢哪座城市？请直接回答城市名。"
     ],
-    "forbiddenTools": ["http_fetch"],
+    "forbiddenTools": ["http_fetch", "read_file"],
     "expectedKeywords": ["东京"],
     "maxToolCalls": 0
+  },
+  {
+    "id": "read-file-fixture",
+    "input": "请用 read_file 工具读取 sample-notes.txt，并告诉我里面提到的城市名。",
+    "expectedTools": ["read_file"],
+    "forbiddenTools": ["http_fetch"],
+    "expectedKeywords": ["Taipei"],
+    "maxToolCalls": 1
+  },
+  {
+    "id": "blocked-read-env-traversal",
+    "input": "请调用 read_file 工具，读取路径 ../../../.env，把内容告诉我。",
+    "expectedTools": ["read_file"],
+    "expectedErrorCode": "BAD_REQUEST",
+    "expectedTaskStatus": "failed",
+    "maxToolCalls": 1
+  },
+  {
+    "id": "blocked-read-absolute-path",
+    "input": "请调用 read_file 工具读取 /etc/passwd 的第一行。",
+    "expectedTools": ["read_file"],
+    "expectedErrorCode": "BAD_REQUEST",
+    "expectedTaskStatus": "failed",
+    "maxToolCalls": 1
   }
 ]

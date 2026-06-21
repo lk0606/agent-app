@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "dotenv_config_path=.env tsx src/index.ts",
-    "dev:server": "dotenv_config_path=.env tsx watch src/server.ts",
+    "dev": "dotenv_config_path=.env nodemon --watch src --ext ts --exec \"tsx src/index.ts\"",
+    "dev:server": "pnpm --filter @agent-app/api-contract build && concurrently -k -n contract,server -c blue,green \"pnpm --filter @agent-app/api-contract dev:watch\" \"nodemon --config nodemon.json\"",
+    "dev:server:once": "dotenv_config_path=.env tsx src/server.ts",
     "build": "pnpm --filter @agent-app/api-contract build && tsc -p tsconfig.json",
     "start": "dotenv_config_path=.env node dist/index.js",
     "start:server": "dotenv_config_path=.env node dist/server.js",
@@ -28,6 +29,8 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/pg": "^8.20.0",
+    "concurrently": "^10.0.3",
+    "nodemon": "^3.1.14",
     "tsx": "^4.19.0",
     "typescript": "^5.8.0"
   }

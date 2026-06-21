@@ -10,11 +10,10 @@ import { ToolStepCard } from "./tool-step-card";
 
 export function RunTimeline({ run }: { run: AssistantRunMessage }) {
   const t = useTranslations("chat");
-  const visibleSteps = getVisibleSteps(run.steps, run.status);
 
   return (
     <div className="space-y-3">
-      {visibleSteps.map((step) => (
+      {run.steps.map((step) => (
         <motion.div
           animate={{ opacity: 1, y: 0 }}
           initial={{ opacity: 0, y: 8 }}
@@ -24,7 +23,7 @@ export function RunTimeline({ run }: { run: AssistantRunMessage }) {
           <RunStepView runStatus={run.status} step={step} />
         </motion.div>
       ))}
-      {run.status === "running" && visibleSteps.length === 0 ? (
+      {run.status === "running" && run.steps.length === 0 ? (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
           {t("status.thinking")}
@@ -37,37 +36,8 @@ export function RunTimeline({ run }: { run: AssistantRunMessage }) {
   );
 }
 
-function getVisibleSteps(steps: RunStep[], runStatus: AssistantRunMessage["status"]): RunStep[] {
-  if (runStatus === "done") {
-    return steps.filter((step) => step.kind !== "thinking");
-  }
-
-  return steps.filter((step) => {
-    if (step.kind !== "thinking") {
-      return true;
-    }
-
-    return !steps.some(
-      (other) =>
-        other.id !== step.id &&
-        "step" in other &&
-        other.step === step.step &&
-        (other.kind === "planner_decision" || other.kind === "tool"),
-    );
-  });
-}
-
 function RunStepView({ step, runStatus }: { step: RunStep; runStatus: AssistantRunMessage["status"] }) {
   const t = useTranslations("chat");
-
-  if (step.kind === "thinking") {
-    return (
-      <div className="flex items-center gap-2 rounded-xl border border-border/70 bg-panel/70 px-3 py-2 text-xs text-muted-foreground">
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
-        {t("timeline.thinking", { step: step.step })}
-      </div>
-    );
-  }
 
   if (step.kind === "planner_decision") {
     return (

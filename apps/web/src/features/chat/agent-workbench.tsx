@@ -124,7 +124,6 @@ export function AgentWorkbench() {
         (event) => {
           const applyEvent = () => {
             switch (event.type) {
-              case "thinking":
               case "planner_decision":
               case "tool_start":
               case "tool_end":

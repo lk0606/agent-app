@@ -187,17 +187,32 @@ async function main(): Promise<void> {
     });
   });
 
-  const shutdown = async () => {
-    server.close();
-    await pool.end();
+  let shuttingDown = false;
+
+  const shutdown = (signal: NodeJS.Signals) => {
+    if (shuttingDown) {
+      return;
+    }
+
+    shuttingDown = true;
+    logger.info("Shutting down HTTP server", { signal });
+
+    server.closeAllConnections?.();
+
+    const finish = () => {
+      void pool.end().finally(() => {
+        process.exit(0);
+      });
+    };
+
+    server.close(finish);
+
+    // nodemon 重启时若 close 被 SSE 长连接拖住，强制释放端口
+    setTimeout(finish, 500).unref();
   };
 
-  process.on("SIGINT", () => {
-    void shutdown();
-  });
-  process.on("SIGTERM", () => {
-    void shutdown();
-  });
+  process.once("SIGINT", () => shutdown("SIGINT"));
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
 }
 
 main().catch((error: unknown) => {

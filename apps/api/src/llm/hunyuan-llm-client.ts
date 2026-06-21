@@ -26,6 +26,7 @@ export class HunyuanLlmClient implements LlmClient {
               "Use a tool only when it materially improves accuracy.",
               "If the user asks for current date or time, call the time tool.",
               "If the user asks to open, read, summarize, or inspect a URL, call the http_fetch tool.",
+              "If the user asks to read a local text file or project document, call the read_file tool with a relative sandbox path.",
               "If previous tool results are already sufficient, answer directly instead of calling the same tool repeatedly.",
             ].join(" "),
           },

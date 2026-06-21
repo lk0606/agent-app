@@ -21,7 +21,7 @@
 ```bash
 docker compose -f apps/api/infra/postgres/compose.yaml up -d
 pnpm run db:migrate
-pnpm run dev:server
+pnpm run dev:server   # nodemon 热更新：改 apps/api 或 packages/api-contract 后自动重启
 ```
 
 再开一个终端启动前端：
@@ -60,7 +60,7 @@ NEXT_PUBLIC_AGENT_API_BASE_URL=http://localhost:3000
 先确认启动的是 HTTP 服务：
 
 ```bash
-pnpm run dev:server
+pnpm run dev:server   # nodemon 热更新：改 apps/api 或 packages/api-contract 后自动重启
 ```
 
 不要用下面这个命令联调前端：

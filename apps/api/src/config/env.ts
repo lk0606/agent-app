@@ -1,3 +1,6 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 export interface AppConfig {
   appName: string;
   nodeEnv: string;
@@ -16,6 +19,10 @@ export interface AppConfig {
   httpFetchAllowedContentTypes: string[];
   httpFetchAllowHosts: string[];
   httpFetchDenyHosts: string[];
+  readFileRootDir: string;
+  readFileMaxBytes: number;
+  readFileAllowedExtensions: string[];
+  readFileDeniedBasenames: string[];
   port: number;
 }
 
@@ -31,6 +38,8 @@ export function loadConfig(): AppConfig {
   if (!databaseUrl) {
     throw new Error("Missing DATABASE_URL. Please set it in your environment or .env file.");
   }
+
+  const apiRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
   return {
     appName: process.env.APP_NAME ?? "agent-app",
@@ -53,6 +62,10 @@ export function loadConfig(): AppConfig {
     ),
     httpFetchAllowHosts: readList("HTTP_FETCH_ALLOW_HOSTS", ""),
     httpFetchDenyHosts: readList("HTTP_FETCH_DENY_HOSTS", "localhost,127.0.0.1,0.0.0.0"),
+    readFileRootDir: process.env.READ_FILE_ROOT_DIR ?? path.join(apiRoot, "evals/fixtures"),
+    readFileMaxBytes: readNumber("READ_FILE_MAX_BYTES", 8192),
+    readFileAllowedExtensions: readList("READ_FILE_ALLOWED_EXTENSIONS", ".txt,.md,.json,.yaml,.yml"),
+    readFileDeniedBasenames: readList("READ_FILE_DENIED_BASENAMES", ".env,.env.local,credentials.json"),
     port: readNumber("PORT", 3000),
   };
 }

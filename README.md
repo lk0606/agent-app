@@ -68,10 +68,16 @@ PORT=3000
 DATABASE_URL=postgres://agent:agent@127.0.0.1:5432/agent_app
 ```
 
-启动 HTTP 服务：
+启动 HTTP 服务（**nodemon 热更新**：改 `apps/api/src` 或 `packages/api-contract` 后自动重启）：
 
 ```bash
 pnpm run dev:server
+```
+
+仅单次启动、不监听文件变更：
+
+```bash
+pnpm --filter @agent-app/api dev:server:once
 ```
 
 启动 Next.js 前端：

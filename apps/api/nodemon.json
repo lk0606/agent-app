@@ -1,0 +1,8 @@
+{
+  "watch": ["src", "../../packages/api-contract/dist"],
+  "ext": "ts,js,json",
+  "ignore": ["**/*.d.ts", "**/*.map"],
+  "exec": "dotenv_config_path=.env tsx src/server.ts",
+  "signal": "SIGTERM",
+  "delay": 500
+}

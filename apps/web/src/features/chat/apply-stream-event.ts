@@ -11,25 +11,14 @@ function upsertStep(steps: RunStep[], step: RunStep): RunStep[] {
   return steps.map((item, itemIndex) => (itemIndex === index ? step : item));
 }
 
-function removeThinkingForStep(steps: RunStep[], step: number): RunStep[] {
-  return steps.filter((item) => !(item.kind === "thinking" && item.step === step));
-}
-
-function removeAllThinking(steps: RunStep[]): RunStep[] {
-  return steps.filter((item) => item.kind !== "thinking");
-}
-
 /** 将 SSE 事件归约成 RunTimeline 步骤（纯函数，便于测试） */
 export function applyStreamEvent(steps: RunStep[], event: AgentStreamEvent): RunStep[] {
   switch (event.type) {
     case "thinking":
-      return upsertStep(steps, {
-        id: `thinking-${event.step}`,
-        kind: "thinking",
-        step: event.step,
-      });
+      // 契约保留；当前后端不 emit，忽略即可
+      return steps;
     case "planner_decision":
-      return upsertStep(removeThinkingForStep(steps, event.step), {
+      return upsertStep(steps, {
         id: `decision-${event.step}`,
         kind: "planner_decision",
         step: event.step,
@@ -38,7 +27,7 @@ export function applyStreamEvent(steps: RunStep[], event: AgentStreamEvent): Run
         toolInput: event.toolInput,
       });
     case "tool_start":
-      return upsertStep(removeThinkingForStep(steps, event.step), {
+      return upsertStep(steps, {
         id: `tool-${event.step}`,
         kind: "tool",
         step: event.step,
@@ -60,9 +49,8 @@ export function applyStreamEvent(steps: RunStep[], event: AgentStreamEvent): Run
       });
     }
     case "token": {
-      const baseSteps = removeAllThinking(steps);
-      const existing = baseSteps.find((item) => item.kind === "answer");
-      return upsertStep(baseSteps, {
+      const existing = steps.find((item) => item.kind === "answer");
+      return upsertStep(steps, {
         id: "answer",
         kind: "answer",
         content: `${existing?.kind === "answer" ? existing.content : ""}${event.delta}`,
@@ -75,7 +63,7 @@ export function applyStreamEvent(steps: RunStep[], event: AgentStreamEvent): Run
 }
 
 export function finalizeAnswerStep(steps: RunStep[], summary: string): RunStep[] {
-  return upsertStep(removeAllThinking(steps), {
+  return upsertStep(steps, {
     id: "answer",
     kind: "answer",
     content: summary,

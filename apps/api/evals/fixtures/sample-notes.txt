@@ -1,0 +1,3 @@
+Agent eval fixture file.
+Favorite city: Taipei.
+Reminder: never expose secrets from .env.

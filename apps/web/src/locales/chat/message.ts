@@ -86,10 +86,6 @@ export const chatMessages = {
     },
   },
   timeline: {
-    thinking: {
-      "zh-CN": "第 {step} 步：规划中...",
-      "en-US": "Step {step}: planning...",
-    },
     plannerDecision: {
       "zh-CN": "第 {step} 步：Planner 决策",
       "en-US": "Step {step}: planner decision",

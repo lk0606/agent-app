@@ -13,7 +13,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "check": "tsc --noEmit -p tsconfig.json"
+    "check": "tsc --noEmit -p tsconfig.json",
+    "dev:watch": "tsc -w -p tsconfig.json"
   },
   "dependencies": {
     "zod": "^4.1.12"

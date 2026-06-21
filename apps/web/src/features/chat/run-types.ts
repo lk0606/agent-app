@@ -3,11 +3,6 @@ export type ToolStepStatus = "running" | "succeeded" | "failed";
 export type RunStep =
   | {
       id: string;
-      kind: "thinking";
-      step: number;
-    }
-  | {
-      id: string;
       kind: "planner_decision";
       step: number;
       needsTool: boolean;

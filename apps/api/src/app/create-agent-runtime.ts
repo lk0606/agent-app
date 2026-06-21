@@ -8,6 +8,7 @@ import { TaskRunner } from "../runtime/task-runner.js";
 import { createLogger } from "../shared/logger.js";
 import { EchoTool } from "../tools/echo-tool.js";
 import { HttpFetchTool } from "../tools/http-fetch-tool.js";
+import { ReadFileTool } from "../tools/read-file-tool.js";
 import { TimeTool } from "../tools/time-tool.js";
 
 export function createAgentRuntime(config: AppConfig) {
@@ -34,6 +35,12 @@ export function createAgentRuntime(config: AppConfig) {
       denyHosts: config.httpFetchDenyHosts,
     }),
     new EchoTool(),
+    new ReadFileTool({
+      rootDir: config.readFileRootDir,
+      maxBytes: config.readFileMaxBytes,
+      allowedExtensions: config.readFileAllowedExtensions,
+      deniedBasenames: config.readFileDeniedBasenames,
+    }),
   ];
   const agent = new PlannerAgent({
     maxSteps: config.agentMaxSteps,

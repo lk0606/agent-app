@@ -20,10 +20,6 @@ export function emitPlannerDecision(
   });
 }
 
-export function emitThinking(emit: StreamEmitter | undefined, taskId: string, step: number): void {
-  emit?.({ type: "thinking", taskId, step });
-}
-
 /** 无 LLM stream 时的 fallback（如 plan 直接返回 draftAnswer） */
 export async function emitTokenStream(
   emit: StreamEmitter,
@@ -53,20 +49,12 @@ export function createTokenHandler(
   taskId: string,
   streamedFlag: { value: boolean },
 ): (delta: string) => void {
-  let drainChain = Promise.resolve();
-
   return (delta: string) => {
     if (!delta) {
       return;
     }
 
     streamedFlag.value = true;
-    drainChain = drainChain.then(async () => {
-      emit?.({ type: "token", taskId, delta });
-      // 混元可能一次返回较大 delta；让出事件循环以便 SSE flush + 前端逐帧渲染
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, 0);
-      });
-    });
+    emit?.({ type: "token", taskId, delta });
   };
 }
