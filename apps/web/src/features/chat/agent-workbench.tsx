@@ -18,9 +18,17 @@ import { useTranslations } from "next-intl";
 import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { ThemeToggle } from "@/components/layout/theme-toggle";
-import { runAgent } from "@/lib/api/agent-api";
+import { streamAgent } from "@/lib/api/agent-api";
 
-type MessageStatus = "sending" | "sent" | "failed" | "thinking";
+type MessageStatus = "sending" | "sent" | "failed" | "thinking" | "streaming";
+
+type StreamToolState = {
+  toolName: string;
+  toolInput: string;
+  status: "running" | "succeeded" | "failed";
+  output?: string | null;
+  errorMessage?: string | null;
+};
 
 type ChatMessage = {
   id: string;
@@ -39,6 +47,7 @@ export function AgentWorkbench() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [streamTool, setStreamTool] = useState<StreamToolState | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -101,33 +110,115 @@ export function AgentWorkbench() {
       ];
     });
     setIsRunning(true);
+    setStreamTool(null);
 
     try {
-      const response = await runAgent({
-        input: content,
-        ...(sessionId ? { sessionId } : {}),
-      });
+      let streamedContent = "";
+      let streamedToolCalls: AgentToolCall[] = [];
+      let pendingToolInput = "";
 
-      setSessionId(response.sessionId);
-      setTaskId(response.taskId);
-      setMessages((current) =>
-        current.map((message) => {
-          if (message.id === messageId) {
-            return { ...message, error: undefined, status: "sent" as const };
+      await streamAgent(
+        {
+          input: content,
+          ...(sessionId ? { sessionId } : {}),
+        },
+        (event) => {
+          switch (event.type) {
+            case "thinking":
+              setMessages((current) =>
+                current.map((message) =>
+                  message.id === assistantMessageId
+                    ? {
+                        ...message,
+                        content: t("status.thinking"),
+                        status: "thinking" as const,
+                      }
+                    : message,
+                ),
+              );
+              return;
+            case "tool_start":
+              pendingToolInput = event.toolInput;
+              setStreamTool({
+                toolName: event.toolName,
+                toolInput: event.toolInput,
+                status: "running",
+              });
+              setMessages((current) =>
+                current.map((message) =>
+                  message.id === assistantMessageId
+                    ? {
+                        ...message,
+                        content: `${t("status.toolRunning")}: ${event.toolName}`,
+                        status: "thinking" as const,
+                      }
+                    : message,
+                ),
+              );
+              return;
+            case "tool_end":
+              setStreamTool((current) => ({
+                toolName: event.toolName,
+                toolInput: current?.toolInput ?? pendingToolInput,
+                status: event.status,
+                output: event.toolOutput ?? null,
+                errorMessage: event.errorMessage ?? null,
+              }));
+
+              if (event.status === "succeeded" && event.toolOutput) {
+                streamedToolCalls = [
+                  ...streamedToolCalls.filter((item) => item.toolName !== event.toolName),
+                  {
+                    toolName: event.toolName,
+                    input: pendingToolInput,
+                    output: event.toolOutput,
+                  },
+                ];
+              }
+              return;
+            case "token":
+              streamedContent += event.delta;
+              setMessages((current) =>
+                current.map((message) =>
+                  message.id === assistantMessageId
+                    ? {
+                        ...message,
+                        content: streamedContent,
+                        status: "streaming" as const,
+                        toolCalls: streamedToolCalls,
+                      }
+                    : message,
+                ),
+              );
+              return;
+            case "done":
+              setSessionId(event.sessionId);
+              setTaskId(event.taskId);
+              setStreamTool(null);
+              setMessages((current) =>
+                current.map((message) => {
+                  if (message.id === messageId) {
+                    return { ...message, error: undefined, status: "sent" as const };
+                  }
+
+                  if (message.id === assistantMessageId) {
+                    return {
+                      ...message,
+                      id: event.taskId,
+                      content: event.result.summary,
+                      status: "sent" as const,
+                      toolCalls: event.result.toolCalls,
+                    };
+                  }
+
+                  return message;
+                }),
+              );
+              return;
+            case "error":
+              throw new Error(event.message);
           }
-
-          if (message.id === assistantMessageId) {
-            return {
-              ...message,
-              id: response.taskId,
-              content: response.result.summary,
-              status: "sent" as const,
-              toolCalls: response.result.toolCalls,
-            };
-          }
-
-          return message;
-        }),
+        },
       );
     } catch (requestError) {
       const message = formatRequestError(requestError);
@@ -234,6 +325,7 @@ export function AgentWorkbench() {
                       retryLabel={t("composer.retry")}
                       sendingLabel={t("status.sending")}
                       thinkingLabel={t("status.thinking")}
+                      streamingLabel={t("status.streaming")}
                       onRetry={(failedMessage) => {
                         void sendMessage(failedMessage.content, failedMessage.id);
                       }}
@@ -278,6 +370,22 @@ export function AgentWorkbench() {
               <DebugField label={t("panels.task")} value={taskId ?? "-"} />
               <section className="rounded-[1.25rem] border border-border/80 bg-panel/85 p-3">
                 <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                  <Loader2 className={`h-3.5 w-3.5 ${streamTool?.status === "running" ? "animate-spin text-accent" : ""}`} />
+                  {t("status.toolRunning")}
+                </div>
+                {streamTool ? (
+                  <div className="space-y-1 font-mono text-xs text-muted-foreground">
+                    <p>{streamTool.toolName}</p>
+                    <p className="break-all">input: {streamTool.toolInput || "-"}</p>
+                    <p>{streamTool.status}</p>
+                    {streamTool.output ? <p className="line-clamp-3 break-all">output: {streamTool.output}</p> : null}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">-</p>
+                )}
+              </section>
+              <section className="rounded-[1.25rem] border border-border/80 bg-panel/85 p-3">
+                <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                   <Wrench className="h-3.5 w-3.5" />
                   {t("panels.tools")}
                 </div>
@@ -317,6 +425,7 @@ function MessageRow({
   retryLabel,
   sendingLabel,
   thinkingLabel,
+  streamingLabel,
   onRetry,
 }: {
   isRunning: boolean;
@@ -324,12 +433,14 @@ function MessageRow({
   retryLabel: string;
   sendingLabel: string;
   thinkingLabel: string;
+  streamingLabel: string;
   onRetry: (message: ChatMessage) => void;
 }) {
   const isUser = message.role === "user";
   const isFailed = message.status === "failed";
   const isSending = message.status === "sending";
   const isThinking = message.status === "thinking";
+  const isStreaming = message.status === "streaming";
 
   return (
     <article className={`flex items-start gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
@@ -366,6 +477,12 @@ function MessageRow({
             <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
               <span>{thinkingLabel}</span>
+            </div>
+          ) : null}
+          {isStreaming ? (
+            <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
+              <span>{streamingLabel}</span>
             </div>
           ) : null}
           {isFailed ? (

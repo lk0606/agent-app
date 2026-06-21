@@ -1,13 +1,15 @@
 import "dotenv/config";
 
 import { ListSessionsQuerySchema, RunAgentRequestSchema } from "@agent-app/api-contract";
-import { randomUUID } from "node:crypto";
+import type { AgentStreamEvent } from "@agent-app/api-contract";
 import { createServer } from "node:http";
 
 import { createAgentRuntime } from "./app/create-agent-runtime.js";
 import { loadConfig } from "./config/env.js";
 import { getPathSegments, readJsonBody } from "./http/http-request.js";
 import { HTTP_STATUS, statusForError, writeJson } from "./http/http-response.js";
+import { prepareAgentRun } from "./http/prepare-agent-run.js";
+import { endSseResponse, initSseResponse, writeSseEvent } from "./http/sse-response.js";
 import { parseSchema } from "./http/validation.js";
 import { AppError, classifyError } from "./shared/app-error.js";
 
@@ -33,27 +35,55 @@ async function main(): Promise<void> {
       if (req.method === "POST" && requestUrl.pathname === "/agent/run") {
         const body = await readJsonBody(req);
         const agentRequest = parseSchema(RunAgentRequestSchema, body, "Request body");
-        let sessionId = agentRequest.sessionId ?? null;
-
-        if (!sessionId) {
-          sessionId = randomUUID();
-          await memory.createSession({
-            id: sessionId,
-          });
-        } else {
-          const session = await memory.getSession(sessionId);
-
-          if (!session) {
-            await memory.createSession({
-              id: sessionId,
-            });
-          }
-        }
-
-        const taskId = agentRequest.taskId ?? randomUUID();
+        const { sessionId, taskId } = await prepareAgentRun(memory, agentRequest);
         const result = await runner.run({ taskId, sessionId, input: agentRequest.input });
 
         writeJson(res, HTTP_STATUS.ok, { sessionId, taskId, result });
+        return;
+      }
+
+      if (req.method === "POST" && requestUrl.pathname === "/agent/stream") {
+        const body = await readJsonBody(req);
+        const agentRequest = parseSchema(RunAgentRequestSchema, body, "Request body");
+        const { sessionId, taskId } = await prepareAgentRun(memory, agentRequest);
+
+        initSseResponse(res);
+
+        const emitStream = (event: AgentStreamEvent) => {
+          writeSseEvent(res, event.type, event);
+        };
+
+        try {
+          const result = await runner.run(
+            { taskId, sessionId, input: agentRequest.input },
+            { emitStream },
+          );
+
+          writeSseEvent(res, "done", {
+            type: "done",
+            sessionId,
+            taskId,
+            result,
+          });
+        } catch (error: unknown) {
+          const appError = classifyError(error);
+
+          logger.error("Agent stream failed", {
+            taskId,
+            code: appError.code,
+            message: appError.message,
+          });
+
+          writeSseEvent(res, "error", {
+            type: "error",
+            taskId,
+            code: appError.code,
+            message: appError.message,
+          });
+        } finally {
+          endSseResponse(res);
+        }
+
         return;
       }
 
@@ -153,6 +183,7 @@ async function main(): Promise<void> {
       port: config.port,
       healthUrl: `http://localhost:${config.port}/health`,
       runUrl: `http://localhost:${config.port}/agent/run`,
+      streamUrl: `http://localhost:${config.port}/agent/stream`,
     });
   });
 

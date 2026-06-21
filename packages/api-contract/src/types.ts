@@ -20,6 +20,7 @@ import type {
   TaskRecordSchema,
   ToolCallRecordSchema,
 } from "./schemas.js";
+import type { AgentStreamEventSchema } from "./stream-events.js";
 
 export type SessionRecord = z.infer<typeof SessionRecordSchema>;
 export type TaskRecord = z.infer<typeof TaskRecordSchema>;
@@ -41,3 +42,4 @@ export type ArchiveSessionResponse = z.infer<typeof ArchiveSessionResponseSchema
 export type GetTaskResponse = z.infer<typeof GetTaskResponseSchema>;
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
+export type AgentStreamEvent = z.infer<typeof AgentStreamEventSchema>;

@@ -1,4 +1,5 @@
 import type { RecordPlannerStepInput } from "../memory/memory-store.js";
+import { emitThinking, emitTokenStream } from "../runtime/agent-stream.js";
 import { AppError } from "../shared/app-error.js";
 import type { Agent, AgentContext, AgentRequest, AgentResponse } from "./base-agent.js";
 
@@ -29,6 +30,8 @@ export class PlannerAgent implements Agent {
       const stepNumber = step + 1;
       const stepStartedAt = Date.now();
       const stepCreatedAt = new Date(stepStartedAt).toISOString();
+
+      emitThinking(context.emitStream, request.taskId, stepNumber);
 
       const decision = await context.llm.plan({
         sessionSummary: sessionContext.sessionSummary,
@@ -84,6 +87,8 @@ export class PlannerAgent implements Agent {
         const lastCall = toolCalls[toolCalls.length - 1];
 
         if (lastCall) {
+          emitThinking(context.emitStream, request.taskId, stepNumber);
+
           finalAnswer = await context.llm.answerWithTool({
             sessionSummary: sessionContext.sessionSummary,
             conversationHistory: sessionContext.recentHistory,
@@ -121,6 +126,8 @@ export class PlannerAgent implements Agent {
           toolInput,
         });
 
+        emitThinking(context.emitStream, request.taskId, stepNumber);
+
         finalAnswer = await context.llm.answerWithTool({
           sessionSummary: sessionContext.sessionSummary,
           conversationHistory: sessionContext.recentHistory,
@@ -142,6 +149,14 @@ export class PlannerAgent implements Agent {
       }
 
       context.logger.info("Tool execution started", {
+        step: stepNumber,
+        toolName: tool.name,
+        toolInput,
+      });
+
+      context.emitStream?.({
+        type: "tool_start",
+        taskId: request.taskId,
         step: stepNumber,
         toolName: tool.name,
         toolInput,
@@ -183,6 +198,15 @@ export class PlannerAgent implements Agent {
           output: toolOutput,
         });
 
+        context.emitStream?.({
+          type: "tool_end",
+          taskId: request.taskId,
+          step: stepNumber,
+          toolName: tool.name,
+          status: "succeeded",
+          toolOutput: toolOutput.slice(0, 240),
+        });
+
         await recordStep({
           needsTool: true,
           toolName: tool.name,
@@ -194,6 +218,16 @@ export class PlannerAgent implements Agent {
       } catch (error: unknown) {
         const errorCode = error instanceof AppError ? error.code : "TOOL_ERROR";
         const errorMessage = error instanceof Error ? error.message : String(error);
+
+        context.emitStream?.({
+          type: "tool_end",
+          taskId: request.taskId,
+          step: stepNumber,
+          toolName: tool.name,
+          status: "failed",
+          errorCode,
+          errorMessage,
+        });
 
         await context.memory.recordToolCall({
           taskId: request.taskId,
@@ -231,6 +265,9 @@ export class PlannerAgent implements Agent {
 
       const fallbackStartedAt = Date.now();
       const fallbackCreatedAt = new Date(fallbackStartedAt).toISOString();
+      const fallbackStep = toolCalls.length + 1;
+
+      emitThinking(context.emitStream, request.taskId, fallbackStep);
 
       finalAnswer = await context.llm.answerWithTool({
         sessionSummary: sessionContext.sessionSummary,
@@ -244,7 +281,7 @@ export class PlannerAgent implements Agent {
       await context.memory.recordPlannerStep({
         // 循环因 maxSteps 结束且尚无 finalAnswer 时，用最后一次工具结果强行生成回答。
         taskId: request.taskId,
-        step: toolCalls.length + 1,
+        step: fallbackStep,
         needsTool: false,
         toolName: lastCall.toolName,
         toolInput: lastCall.input,
@@ -253,6 +290,10 @@ export class PlannerAgent implements Agent {
         createdAt: fallbackCreatedAt,
         finishedAt: new Date().toISOString(),
       });
+    }
+
+    if (context.emitStream) {
+      emitTokenStream(context.emitStream, request.taskId, finalAnswer);
     }
 
     await context.memory.append(request.taskId, {

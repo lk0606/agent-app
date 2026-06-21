@@ -72,6 +72,14 @@ export const chatMessages = {
       "zh-CN": "AI 正在思考...",
       "en-US": "AI is thinking...",
     },
+    toolRunning: {
+      "zh-CN": "工具执行中",
+      "en-US": "Tool running",
+    },
+    streaming: {
+      "zh-CN": "生成中",
+      "en-US": "Streaming",
+    },
     needsRetry: {
       "zh-CN": "待重发",
       "en-US": "Needs retry",

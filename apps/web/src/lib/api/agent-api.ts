@@ -1,8 +1,11 @@
 import {
   RunAgentResponseSchema,
+  type AgentStreamEvent,
   type RunAgentRequest,
   type RunAgentResponse,
 } from "@agent-app/api-contract";
+
+import { readAgentStream } from "./sse-client";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3000";
 
@@ -22,6 +25,27 @@ export async function runAgent(input: RunAgentRequest): Promise<RunAgentResponse
   }
 
   return RunAgentResponseSchema.parse(payload);
+}
+
+/** SSE 流式跑 Agent；onEvent 按顺序收到 thinking / tool_* / token / done | error */
+export async function streamAgent(
+  input: RunAgentRequest,
+  onEvent: (event: AgentStreamEvent) => void,
+): Promise<void> {
+  const response = await fetch(`${getApiBaseUrl()}/agent/stream`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json()) as unknown;
+    throw new Error(readErrorMessage(payload));
+  }
+
+  await readAgentStream(response, onEvent);
 }
 
 function getApiBaseUrl(): string {

@@ -97,6 +97,6 @@ pnpm run check:all
 
 ## 当前边界
 
-第一版暂时只做普通请求，不做 streaming。等后端增加 SSE 或 AI SDK stream-compatible endpoint 后，再升级成流式消息展示。
+Chat 已默认走 **`POST /agent/stream` SSE**（thinking / 工具态 / token 逐段）。`/agent/run` 仍可用于 curl 一次性 JSON。
 
 `shadcn/ui` 暂时没有通过 CLI 初始化。当前页面先用 Tailwind 和少量业务组件跑通闭环；等按钮、输入框、弹窗、侧栏开始多处复用时，再把 `components/ui` 作为稳定基础组件层引入。

@@ -181,6 +181,42 @@ GET /tasks/:taskId
 
 这个接口主要给前端调试面板和任务回放详情使用。
 
+## Stream Agent（SSE）
+
+```http
+POST /agent/stream
+```
+
+请求 body 与 `POST /agent/run` 相同（`RunAgentRequestSchema`）。
+
+响应为 **`text/event-stream`**。每个 SSE 帧：
+
+```text
+event: thinking
+data: {"type":"thinking","taskId":"...","step":1}
+```
+
+### 事件类型（`AgentStreamEvent`）
+
+| type | 含义 |
+|------|------|
+| `thinking` | 开始一轮 `llm.plan` 或 `answerWithTool` |
+| `tool_start` | 即将执行工具 |
+| `tool_end` | 工具结束（`status`: succeeded / failed） |
+| `token` | 回答片段（当前为完整回答切片，非 LLM 原生流） |
+| `done` | 任务成功结束，含 `sessionId`、`taskId`、`result` |
+| `error` | 任务失败，含 `code`、`message` |
+
+命名见 `docs/current-status.md` 【H 节】：SSE 事件 **不是** OpenTelemetry `traceId`；落库决策链看 `plannerTrace`。
+
+### curl 示例
+
+```bash
+curl -N -X POST http://localhost:3000/agent/stream \
+  -H 'content-type: application/json' \
+  -d '{"input":"请调用 time 工具，用一句话告诉我当前时间"}'
+```
+
 ## Local Test
 
 启动后端：

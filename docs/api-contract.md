@@ -32,6 +32,7 @@ packages/api-contract/
 - `GetSessionMessagesResponseSchema`
 - `ArchiveSessionResponseSchema`
 - `GetTaskResponseSchema`
+- `AgentStreamEventSchema`（`stream-events.ts`，SSE 用）
 - `HealthResponseSchema`
 - `ErrorResponseSchema`
 
@@ -93,7 +94,8 @@ pnpm --filter @agent-app/api-contract build
 - JSON / schema 字段：**camelCase**
 - **禁止**用单独字段名 `trace` 表示 Agent 决策链 → 使用 **`plannerTrace`**
 - 工具执行记录 → **`toolCalls`**（表 `tool_calls`）
-- 未来分布式链路 → **`traceId` / `spanId`**，与 `plannerTrace` 分开
+- SSE 过程事件 → **`AgentStreamEvent.type`**（`thinking`、`tool_start`…），见 `stream-events.ts`
+- 未来分布式链路 → **`traceId` / `spanId`**，与 `plannerTrace` / SSE 分开
 
 后面如果 API 继续增多，可以再拆成：
 
