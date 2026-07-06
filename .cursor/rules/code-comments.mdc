@@ -1,0 +1,42 @@
+---
+description: 每次代码变更须在改动处补必要性注释
+alwaysApply: true
+---
+
+# 必要性注释
+
+每次修改或新增代码时，必须在**本次改动的文件**里补必要注释。详细约定见 `docs/current-status.md`「代码注释」小节。
+
+## 写什么
+
+- 业务规则、非显而易见的分支判断
+- 模块/文件职责（尤其是新 API client、Agent 循环、数据还原逻辑）
+- 与另一概念的区别（如 `plannerTrace` vs `toolCalls`、live SSE vs 服务端历史）
+- 环境/配置陷阱（如 TokenHub base URL 与旧混元 Key 不通用）
+- 为通过 lint 或性能做的非直观写法（注明原因）
+
+## 不写什么
+
+- 一眼能看懂的 import、赋值、标准 CRUD
+- 重复函数名/变量名含义的废话注释
+- 把【E 节】学习要点整段贴进源码
+
+## 示例
+
+```typescript
+// ❌ 多余
+// 设置 sessionId
+setSessionId(id);
+
+// ✅ 有价值
+// 历史只还原 answer 步骤；规划/工具细节在调试面板的 plannerTrace
+steps: answer ? [{ id: "answer", kind: "answer", ... }] : [],
+
+// ✅ 有价值
+// 默认走 TokenHub；旧 api.hunyuan.cloud.tencent.com 的 Key 不能复用
+hunyuanBaseUrl: process.env.HUNYUAN_BASE_URL ?? "https://tokenhub.tencentmaas.com/v1",
+```
+
+## 交付检查
+
+改完代码后自检：本次 diff 里新增的函数/模块/配置，读者能否不翻文档就理解「为什么这样写」？若不能，补一行注释。

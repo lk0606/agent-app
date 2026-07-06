@@ -1,0 +1,58 @@
+---
+description: 后端优先学习；前端仅作调试；每次交付说明后端重点链路
+alwaysApply: true
+---
+
+# 后端优先学习
+
+用户是资深前端，**学习目标是 Node Agent 后端**，不是前端工程。`apps/web` 仅为调试台，用来观察后端行为。
+
+## 默认立场
+
+- **优先讲后端**：HTTP 路由、Agent 循环、LLM 调用、Memory/DB、工具层、eval/replay、契约 schema
+- **前端一笔带过**：只说明「哪块 UI 暴露了哪个 API / 哪张表」，不展开 React 细节
+- **验证以后端为主**：`curl`、`pnpm run evals:run`、`pnpm run task:replay`；UI 手测为可选
+- **文档写回【E 节】**：`docs/current-status.md` 的测试方法 / 学习要点 / 代码怎么读，以 `apps/api` 为主
+
+## 每次变更交付时必须附带
+
+在任务完成回复末尾，固定输出 **「本次后端学习重点」** 块，包含：
+
+1. **一句话重点**：这次改动在后端解决了什么
+2. **必读链路**（表格）：顺序 → `apps/api/...` 文件 → 看什么
+3. **建议验证命令**：1–3 条可复制的 curl / pnpm
+4. **前端仅作对照**（可选，≤2 行）：哪个调试面板字段对应哪条 API/表字段
+
+不要省略该块，即使用户未明确要求。
+
+## 后端阅读顺序模板
+
+```text
+HTTP 入口 (server.ts)
+  → 编排 (prepare-agent-run / agent-stream)
+    → PlannerAgent 循环 (planner-agent.ts)
+      → LlmClient (hunyuan-llm-client.ts)
+      → Tool 执行 (tools/*)
+      → MemoryStore 落库 (memory/*)
+  → 契约 (packages/api-contract)
+  → eval / replay 回归 (evals/, scripts/)
+```
+
+按本次 diff 只截取相关子链，不要每次从头通读全仓库。
+
+## 概念对照（讲解时多用）
+
+| 前端调试台看到的 | 后端真相 |
+|------------------|----------|
+| 左栏 session 列表 | `GET /sessions` → `sessions` 表 |
+| summary preview | `sessions.summary`（`summarizeSession` 写入） |
+| message timeline | `GET .../messages` → `messages` 表 |
+| task status / error | `GET /tasks/:id` → `tasks` 表 |
+| plannerTrace | `planner_steps` 表，非 OpenTelemetry trace |
+| RunTimeline 工具卡 | `tool_calls` 表 + SSE `tool_*` 事件 |
+
+## 不要做
+
+- 不要把前端 Step 当主验收项展开
+- 不要建议引入 TanStack Query、新 UI 库等，除非用户明确要求
+- 不要只讲「左栏/右栏怎么实现」而不提对应 API 与表

@@ -47,12 +47,12 @@ pnpm install
 pnpm run dev
 ```
 
-在 `apps/api/.env` 中填入：
+在 `apps/api/.env` 中填入（**API Key 需在 [TokenHub 控制台](https://cloud.tencent.com/product/tokenhub) 创建**）：
 
 ```bash
-HUNYUAN_API_KEY=your_api_key
-HUNYUAN_MODEL=hunyuan-turbos-latest
-HUNYUAN_BASE_URL=https://api.hunyuan.cloud.tencent.com/v1
+HUNYUAN_API_KEY=your_tokenhub_api_key
+HUNYUAN_MODEL=hy3-preview
+HUNYUAN_BASE_URL=https://tokenhub.tencentmaas.com/v1
 AGENT_MAX_STEPS=3
 AGENT_TOOL_CALL_BUDGET=2
 SESSION_HISTORY_MESSAGE_LIMIT=8

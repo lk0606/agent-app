@@ -27,8 +27,8 @@ export const chatMessages = {
       "en-US": "Live Conversation",
     },
     hint: {
-      "zh-CN": "失败消息可以直接重发，成功后会继续复用当前 session。",
-      "en-US": "Failed messages can be retried and will keep using the current session.",
+      "zh-CN": "左侧可选历史 session；发送后会自动复用当前 session。",
+      "en-US": "Pick a session on the left; new messages reuse the active session.",
     },
   },
   overview: {

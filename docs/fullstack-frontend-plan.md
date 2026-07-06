@@ -449,7 +449,7 @@ export default async function LocaleLayout({ children, params }) {
 - 点击 session 能恢复消息时间线
 - 能看到 summary preview
 
-状态：**部分完成** — 后端已完成，前端未接入；详见 `docs/current-status.md` §C Step 2（**当前 P0**）
+状态：**已完成** — 详见 `docs/current-status.md` §C Step 2、`docs/web-setup.md`
 
 ### Step 3：共享 API contract
 
@@ -476,7 +476,7 @@ export default async function LocaleLayout({ children, params }) {
 
 - 一次请求为什么这样回答，前端能看出大概链路
 
-状态：**部分完成** — sessionId/taskId/toolCalls 已有；timeline、summary、task error 待补；详见 `docs/current-status.md` §C Step 4
+状态：**部分完成** — 工作台内 timeline/summary/task/plannerTrace 已完成；独立 `/tasks/[taskId]` 页未做；详见 `docs/current-status.md` §C Step 4
 
 ### Step 5：流式响应（E.3 通路 + E.3.5 完整体验）
 

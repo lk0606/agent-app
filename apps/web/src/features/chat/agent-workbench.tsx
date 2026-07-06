@@ -1,27 +1,33 @@
 "use client";
 
-import type { AgentToolCall } from "@agent-app/api-contract";
+import type { AgentToolCall, GetTaskResponse, SessionMemoryMessage, SessionRecord } from "@agent-app/api-contract";
 import {
   AlertCircle,
   Bot,
   CheckCircle2,
-  Database,
   Loader2,
   RefreshCcw,
   Send,
   Sparkles,
   User,
-  Wrench,
   Zap,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { type FormEvent, type KeyboardEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { streamAgent } from "@/lib/api/agent-api";
+import {
+  archiveSession,
+  getSession,
+  getSessionMessages,
+  getTask,
+  listSessions,
+} from "@/lib/api/session-api";
 
 import { applyStreamEvent, finalizeAnswerStep } from "./apply-stream-event";
+import { DebugPanel } from "./debug-panel";
 import { RunTimeline } from "./run-timeline";
 import {
   createAssistantRun,
@@ -30,6 +36,8 @@ import {
   type ChatItem,
   type UserChatMessage,
 } from "./run-types";
+import { sessionMessagesToChatItems } from "./session-history";
+import { SessionSidebar } from "./session-sidebar";
 
 export function AgentWorkbench() {
   const t = useTranslations("chat");
@@ -39,14 +47,108 @@ export function AgentWorkbench() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+  const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [sessionLoading, setSessionLoading] = useState(false);
+  const [sessionRecord, setSessionRecord] = useState<SessionRecord | null>(null);
+  const [serverMessages, setServerMessages] = useState<SessionMemoryMessage[]>([]);
+  const [taskDetail, setTaskDetail] = useState<GetTaskResponse | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const latestRun = [...messages].reverse().find(isAssistantRun);
   const latestToolCalls = extractToolCalls(latestRun);
+  // 派生 loading，避免 effect 内同步 setState（eslint react-hooks/set-state-in-effect）
+  const isLoadingTask = Boolean(taskId) && taskDetail?.task.id !== taskId;
+
+  const refreshSessions = useCallback(async () => {
+    setSessionsLoading(true);
+
+    try {
+      const response = await listSessions({ status: "active", limit: 50 });
+      setSessions(response.sessions);
+    } finally {
+      setSessionsLoading(false);
+    }
+  }, []);
+
+  const reloadSessionDebug = useCallback(async (id: string) => {
+    // 只刷新右栏：summary + message timeline，不重置中间聊天气泡
+    const [{ session }, { messages }] = await Promise.all([getSession(id), getSessionMessages(id)]);
+    setSessionRecord(session);
+    setServerMessages(messages);
+  }, []);
+
+  const loadSession = useCallback(async (id: string) => {
+    setSessionLoading(true);
+
+    try {
+      // session 含 tasks；messages 按 taskId 配对后还原 ChatItem
+      const [{ session, tasks }, { messages }] = await Promise.all([
+        getSession(id),
+        getSessionMessages(id),
+      ]);
+
+      setSessionId(id);
+      setSessionRecord(session);
+      setServerMessages(messages);
+      setMessages(sessionMessagesToChatItems(messages, tasks));
+      setTaskId(tasks.at(-1)?.id ?? null);
+    } finally {
+      setSessionLoading(false);
+    }
+  }, []);
+
+  const startNewSession = useCallback(() => {
+    setSessionId(null);
+    setTaskId(null);
+    setMessages([]);
+    setSessionRecord(null);
+    setServerMessages([]);
+    setTaskDetail(null);
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void listSessions({ status: "active", limit: 50 })
+      .then((response) => {
+        if (!cancelled) {
+          setSessions(response.sessions);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSessionsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!taskId) {
+      return;
+    }
+
+    // plannerTrace 只在 GET /tasks/:id，不在 session messages
+    let cancelled = false;
+
+    void getTask(taskId).then((detail) => {
+      if (!cancelled) {
+        setTaskDetail(detail);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [taskId]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -150,6 +252,9 @@ export function AgentWorkbench() {
                       : item,
                   ),
                 );
+                // stream 落库后刷新左栏 summary 与右栏 timeline
+                void refreshSessions();
+                void reloadSessionDebug(event.sessionId);
                 return;
               case "error":
                 throw new Error(event.message);
@@ -180,6 +285,16 @@ export function AgentWorkbench() {
     } finally {
       setIsRunning(false);
     }
+  }
+
+  async function handleArchiveSession() {
+    if (!sessionId || isRunning) {
+      return;
+    }
+
+    await archiveSession(sessionId);
+    startNewSession();
+    await refreshSessions();
   }
 
   function formatRequestError(requestError: unknown): string {
@@ -233,18 +348,22 @@ export function AgentWorkbench() {
 
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 xl:grid-cols-[280px_minmax(0,1fr)_330px]">
           <aside className="hidden min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-border/70 bg-sidebar/80 p-4 shadow-[0_18px_60px_rgba(18,36,30,0.08)] backdrop-blur-xl xl:flex">
-            <div className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-              {common("appName")}
-            </div>
-            <div className="mt-3 rounded-[1.25rem] border border-border/80 bg-panel/85 p-3">
-              <div className="text-sm font-semibold">{t("overview.title")}</div>
-              <p className="mt-1.5 text-sm leading-5 text-muted-foreground">{t("overview.description")}</p>
-            </div>
-            <div className="mt-3 grid gap-2">
-              <MiniStat icon={<Database className="h-4 w-4" />} label={t("panels.session")} value={sessionId ?? "-"} />
-              <MiniStat icon={<Zap className="h-4 w-4" />} label={t("panels.task")} value={taskId ?? "-"} />
-              <MiniStat icon={<Wrench className="h-4 w-4" />} label={t("panels.tools")} value={String(latestToolCalls.length)} />
-            </div>
+            <SessionSidebar
+              isLoading={sessionsLoading || sessionLoading}
+              isRunning={isRunning}
+              selectedSessionId={sessionId}
+              sessions={sessions}
+              onArchive={() => {
+                void handleArchiveSession();
+              }}
+              onNewSession={startNewSession}
+              onRefresh={() => {
+                void refreshSessions();
+              }}
+              onSelectSession={(id) => {
+                void loadSession(id);
+              }}
+            />
           </aside>
 
           <section className="flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-border/70 bg-background/72 shadow-[0_20px_70px_rgba(18,36,30,0.12)] backdrop-blur-xl">
@@ -255,11 +374,19 @@ export function AgentWorkbench() {
                 </div>
                 <div className="mt-1 text-sm text-muted-foreground">{t("conversation.hint")}</div>
               </div>
-              <StatusPill icon={isRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null} label={statusLabel} />
+              <StatusPill
+                icon={isRunning || sessionLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                label={statusLabel}
+              />
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-              {messages.length === 0 ? (
+              {sessionLoading ? (
+                <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin text-accent" />
+                  {t("status.thinking")}
+                </div>
+              ) : messages.length === 0 ? (
                 <EmptyState />
               ) : (
                 <div className="space-y-5">
@@ -305,53 +432,16 @@ export function AgentWorkbench() {
             </form>
           </section>
 
-          <aside className="min-h-0 overflow-hidden rounded-[1.5rem] border border-border/70 bg-sidebar/80 p-4 shadow-[0_18px_60px_rgba(18,36,30,0.08)] backdrop-blur-xl">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-semibold">{t("panels.debug")}</h2>
-                <p className="mt-1 text-sm text-muted-foreground">{t("panels.debugHint")}</p>
-              </div>
-              <StatusPill label={statusLabel} />
-            </div>
-            <div className="mt-4 space-y-3">
-              <DebugField label={t("panels.session")} value={sessionId ?? "-"} />
-              <DebugField label={t("panels.task")} value={taskId ?? "-"} />
-              <section className="rounded-[1.25rem] border border-border/80 bg-panel/85 p-3">
-                <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                  <Loader2
-                    className={`h-3.5 w-3.5 ${latestRun?.steps.some((step) => step.kind === "tool" && step.status === "running") ? "animate-spin text-accent" : ""}`}
-                  />
-                  {t("status.toolRunning")}
-                </div>
-                {latestRun?.steps.find((step) => step.kind === "tool") ? (
-                  <div className="space-y-1 font-mono text-xs text-muted-foreground">
-                    {latestRun.steps
-                      .filter((step) => step.kind === "tool")
-                      .map((step) => (
-                        <div className="break-all" key={step.id}>
-                          <p>{step.toolName}</p>
-                          <p>input: {step.toolInput || "-"}</p>
-                          <p>{step.status}</p>
-                        </div>
-                      ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">-</p>
-                )}
-              </section>
-              <section className="rounded-[1.25rem] border border-border/80 bg-panel/85 p-3">
-                <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                  <Wrench className="h-3.5 w-3.5" />
-                  {t("panels.tools")}
-                </div>
-                {latestToolCalls.length > 0 ? (
-                  <ToolCallList toolCalls={latestToolCalls} />
-                ) : (
-                  <p className="text-sm text-muted-foreground">-</p>
-                )}
-              </section>
-            </div>
-          </aside>
+          <DebugPanel
+            isLoadingTask={isLoadingTask}
+            latestToolCalls={latestToolCalls}
+            serverMessages={serverMessages}
+            session={sessionRecord}
+            sessionId={sessionId}
+            statusLabel={statusLabel}
+            taskDetail={taskId ? taskDetail : null}
+            taskId={taskId}
+          />
         </div>
       </div>
     </main>
@@ -489,45 +579,5 @@ function StatusPill({ icon, label }: { icon?: ReactNode; label: string }) {
       {icon}
       {label}
     </span>
-  );
-}
-
-function MiniStat({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
-  return (
-    <section className="rounded-[1.2rem] border border-border/80 bg-panel/85 p-3">
-      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-        {icon}
-        {label}
-      </div>
-      <div className="mt-2 line-clamp-2 break-all font-mono text-xs leading-5">{value}</div>
-    </section>
-  );
-}
-
-function DebugField({ label, value }: { label: string; value: string }) {
-  return (
-    <section className="rounded-[1.25rem] border border-border/80 bg-panel/85 p-3">
-      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">{label}</div>
-      <div className="mt-2 break-all font-mono text-xs leading-5">{value}</div>
-    </section>
-  );
-}
-
-function ToolCallList({ toolCalls }: { toolCalls: AgentToolCall[] }) {
-  return (
-    <div className="mt-3 space-y-2">
-      {toolCalls.map((toolCall, index) => (
-        <div className="rounded-2xl border border-border/80 bg-background/70 p-3" key={`${toolCall.toolName}-${index}`}>
-          <div className="flex items-center gap-2 text-xs font-semibold">
-            <Wrench className="h-3.5 w-3.5 text-accent" />
-            {toolCall.toolName}
-          </div>
-          <div className="mt-2 space-y-1 font-mono text-xs text-muted-foreground">
-            <p className="break-all">input: {toolCall.input}</p>
-            <p className="line-clamp-3 break-all">output: {toolCall.output}</p>
-          </div>
-        </div>
-      ))}
-    </div>
   );
 }

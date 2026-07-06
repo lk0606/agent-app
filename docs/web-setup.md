@@ -53,6 +53,14 @@ NEXT_PUBLIC_AGENT_API_BASE_URL=http://localhost:3000
 7. 在输入框里按 `Enter` 应该直接发送，按 `Shift+Enter` 应该保留换行。
 8. 在 13 寸 MacBook Air 这类小屏上，页面外层不应该出现纵向滚动条；只有中间对话消息区需要在消息变多时内部滚动。
 
+### Session 列表（Step 2，需 xl 宽屏）
+
+1. 发几条消息后，左侧应出现 session 列表（summary 预览 + 时间）。
+2. 点击某条 session，中间对话恢复历史消息。
+3. 点击「新会话」图标清空当前对话；再点列表项可切回。
+4. 选中 session 后点归档，该项从左栏消失。
+5. 右栏调试面板应同步显示 session summary 与 message timeline。
+
 ## 常见问题
 
 ### 页面提示无法连接后端
