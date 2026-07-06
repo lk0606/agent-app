@@ -1,3 +1,6 @@
+/**
+ * 统一业务错误类型；HTTP 层用 classifyError 转成 JSON { error: { code, message } }。
+ */
 export type ErrorCode =
   | "CONFIG_ERROR"
   | "NETWORK_ERROR"

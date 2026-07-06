@@ -1,3 +1,8 @@
+/**
+ * TaskRunner：一次 HTTP 请求的「外壳」。
+ * 负责 tasks/messages 表的生命周期（创建 → running → succeeded/failed），
+ * 真正的规划循环在 PlannerAgent.plan() 里。
+ */
 import type { Agent, AgentRequest, AgentResponse } from "../agents/base-agent.js";
 import type { LlmClient } from "../llm/llm-client.js";
 import type { MemoryStore } from "../memory/memory-store.js";

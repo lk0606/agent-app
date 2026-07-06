@@ -1,3 +1,14 @@
+/**
+ * HTTP 服务入口（`pnpm run dev:server` 启动此文件）。
+ *
+ * 请求大致分四类：
+ * 1. Agent 执行：POST /agent/run（一次性 JSON）、POST /agent/stream（SSE 推送进度）
+ * 2. Session 查询：GET /sessions、GET /sessions/:id、GET .../messages、PATCH .../archive
+ * 3. Task 观测：GET /tasks/:id（messages + toolCalls + plannerTrace）
+ * 4. 健康检查：GET /health
+ *
+ * 编排链：本文件 → prepareAgentRun → TaskRunner → PlannerAgent → LlmClient / Tools → MemoryStore(Postgres)
+ */
 import "dotenv/config";
 
 import { ListSessionsQuerySchema, RunAgentRequestSchema } from "@agent-app/api-contract";
@@ -19,6 +30,7 @@ async function main(): Promise<void> {
 
   const server = createServer(async (req, res) => {
     try {
+      // 浏览器跨域预检；本地前端 dev 需要
       if (req.method === "OPTIONS") {
         writeJson(res, HTTP_STATUS.noContent, null);
         return;
@@ -32,6 +44,7 @@ async function main(): Promise<void> {
         return;
       }
 
+      // --- Agent 执行（同步 JSON vs SSE 流式，共用 prepareAgentRun 建 session/task）---
       if (req.method === "POST" && requestUrl.pathname === "/agent/run") {
         const body = await readJsonBody(req);
         const agentRequest = parseSchema(RunAgentRequestSchema, body, "Request body");
@@ -87,6 +100,7 @@ async function main(): Promise<void> {
         return;
       }
 
+      // --- Session 查询与归档（只读/软删，不触发 Agent）---
       if (req.method === "GET" && requestUrl.pathname === "/sessions") {
         const query = parseSchema(
           ListSessionsQuerySchema,
@@ -141,6 +155,7 @@ async function main(): Promise<void> {
         return;
       }
 
+      // --- Task 详情：一次返回对话、工具执行、规划决策链（plannerTrace）---
       if (req.method === "GET" && pathSegments[0] === "tasks" && pathSegments.length === 2) {
         const taskId = pathSegments[1];
         const [task, messages, toolCalls, plannerTrace] = await Promise.all([

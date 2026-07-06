@@ -1,3 +1,4 @@
+/** 结构化 JSON 日志，便于 grep / 后续接观测平台 */
 export interface Logger {
   info(message: string, meta?: unknown): void;
   error(message: string, meta?: unknown): void;

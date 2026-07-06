@@ -1,3 +1,7 @@
+/**
+ * 混元（TokenHub OpenAI 兼容接口）的 LlmClient 实现。
+ * model / baseURL 来自 env；旧 api.hunyuan.cloud.tencent.com 的 Key 不能用于 TokenHub。
+ */
 import OpenAI from "openai";
 
 import { AppError } from "../shared/app-error.js";

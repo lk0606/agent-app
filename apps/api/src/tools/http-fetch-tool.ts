@@ -1,3 +1,7 @@
+/**
+ * 抓取公网 URL 并返回纯文本预览。
+ * 安全：denyHosts / allowHosts、内网 IP 拦截、Content-Type 白名单、响应大小上限。
+ */
 import { AppError } from "../shared/app-error.js";
 import type { Tool, ToolInput } from "./tool.js";
 
@@ -90,6 +94,7 @@ export class HttpFetchTool implements Tool {
       throw new AppError("BAD_REQUEST", `HttpFetchTool only supports http/https URLs: ${rawUrl}`);
     }
 
+    // 防止 Agent 被诱导访问内网/metadata（SSRF）；denyHosts 可配 localhost 等
     if (this.options.denyHosts.includes(hostname)) {
       throw new AppError("BAD_REQUEST", `HttpFetchTool blocked denied host: ${hostname}`);
     }

@@ -1,3 +1,7 @@
+/**
+ * CLI 单次演示入口（`pnpm run dev`）。
+ * 不监听 HTTP 端口；联调前端请用 `pnpm run dev:server` → server.ts。
+ */
 import "dotenv/config";
 
 import { createAgentRuntime } from "./app/create-agent-runtime.js";

@@ -1,3 +1,7 @@
+/**
+ * 从 .env 加载运行配置；缺 HUNYUAN_API_KEY / DATABASE_URL 时启动即失败。
+ * 读 apps/api/.env.example 了解各变量含义。
+ */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 

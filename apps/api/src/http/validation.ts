@@ -1,3 +1,4 @@
+/** 把 api-contract 的 Zod schema 失败转成统一的 400 BAD_REQUEST */
 import { AppError } from "../shared/app-error.js";
 
 type SafeParseResult<T> =

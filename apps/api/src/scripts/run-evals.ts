@@ -1,3 +1,7 @@
+/**
+ * Agent 端到端回归：`pnpm run evals:run`。
+ * 读 evals/cases/*.json → 跑 TaskRunner → 断言工具/关键词/失败码 → 写 evals/reports/。
+ */
 import "dotenv/config";
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";

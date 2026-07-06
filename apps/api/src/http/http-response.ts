@@ -1,3 +1,4 @@
+/** JSON 响应与 AppError → HTTP 状态码映射；所有路由共用 CORS 头 */
 import type { ServerResponse } from "node:http";
 
 import type { AppError } from "../shared/app-error.js";

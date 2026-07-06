@@ -1,3 +1,4 @@
+/** 示例工具：返回服务器当前时间，用于验证 function calling 链路 */
 import type { Tool, ToolInput } from "./tool.js";
 
 export class TimeTool implements Tool {

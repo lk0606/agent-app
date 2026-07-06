@@ -12,6 +12,15 @@ type LlmConversationMessage = {
   content: string;
 };
 
+/**
+ * PlannerAgent：本项目的 Agent 核心循环。
+ *
+ * 每一轮 step：
+ *   llm.plan() → 要不要工具 → 执行 Tool → recordPlannerStep / recordToolCall
+ *   → 工具足够时 llm.answerWithTool() 流式生成最终回答
+ *
+ * 有 sessionId 时先 buildSessionContext()：旧消息压成 summary，最近 N 条保留原文。
+ */
 export class PlannerAgent implements Agent {
   constructor(
     private readonly options: {

@@ -10,10 +10,17 @@ alwaysApply: true
 ## 写什么
 
 - 业务规则、非显而易见的分支判断
+- **文件头说明**：本文件在 Agent 链路中的位置（尤其 server.ts、planner-agent、memory、tools）
 - 模块/文件职责（尤其是新 API client、Agent 循环、数据还原逻辑）
 - 与另一概念的区别（如 `plannerTrace` vs `toolCalls`、live SSE vs 服务端历史）
 - 环境/配置陷阱（如 TokenHub base URL 与旧混元 Key 不通用）
 - 为通过 lint 或性能做的非直观写法（注明原因）
+
+## 风格（后端小白友好）
+
+- 用「这一层负责什么 → 数据从哪来到哪去」写，而不是复述代码字面意思
+- 入口文件（server.ts、create-agent-runtime.ts、TaskRunner）优先写文件头块注释
+- 表/字段可点名（如 `planner_steps`、`sessions.summary`），方便对照 SQL 迁移
 
 ## 不写什么
 

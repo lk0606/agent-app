@@ -1,3 +1,7 @@
+/**
+ * Agent 抽象层：定义一次任务请求的入参/出参，以及 plan() 运行时需要的依赖。
+ * 当前唯一实现是 PlannerAgent（多步 plan → 可选 tool → answer）。
+ */
 import type { AgentStreamEvent } from "@agent-app/api-contract";
 import type { LlmClient } from "../llm/llm-client.js";
 import type { MemoryStore } from "../memory/memory-store.js";

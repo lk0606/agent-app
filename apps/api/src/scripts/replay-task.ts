@@ -1,3 +1,7 @@
+/**
+ * 失败任务排查：`pnpm run task:replay -- <taskId>`。
+ * 直接查 DB 打印 task、messages、tool_calls、planner_steps（等同 GET /tasks/:id 的数据面）。
+ */
 import "dotenv/config";
 
 import { loadConfig } from "../config/env.js";

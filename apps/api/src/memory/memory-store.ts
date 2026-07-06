@@ -1,3 +1,8 @@
+/**
+ * MemoryStore：Agent 运行时与 PostgreSQL 之间的抽象接口。
+ * sessions / tasks / messages / tool_calls / planner_steps 五张表的读写都经此接口，
+ * 便于以后换存储实现（测试可用 in-memory-store）。
+ */
 import type {
   PlannerStepOutcome,
   PlannerStepRecord,

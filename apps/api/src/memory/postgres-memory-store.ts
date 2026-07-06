@@ -78,6 +78,7 @@ type PlannerStepRow = {
   finished_at: DbTimestamp;
 };
 
+/** Postgres 版 MemoryStore：HTTP / TaskRunner / PlannerAgent 落库的唯一实现 */
 export class PostgresMemoryStore implements MemoryStore {
   constructor(private readonly pool: Pool) {}
 
@@ -152,6 +153,7 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   async listSessions(input: { status?: SessionStatus; limit?: number } = {}): Promise<SessionRecord[]> {
+    // 默认按最近活动时间倒序，供 GET /sessions 左栏列表
     const result = await this.pool.query<SessionRow>(
       `
         select
@@ -258,6 +260,7 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   async append(taskId: string, message: MemoryMessage): Promise<void> {
+    // 每条 user/assistant/tool 消息挂在一个 task 下；session 通过 tasks.session_id 关联
     await this.pool.query(
       `
         insert into messages (task_id, role, content, created_at)

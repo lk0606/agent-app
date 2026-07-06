@@ -1,3 +1,4 @@
+/** node-pg 连接池；MemoryStore 与迁移脚本共用 */
 import { Pool, type PoolConfig } from "pg";
 
 import { AppError } from "../shared/app-error.js";

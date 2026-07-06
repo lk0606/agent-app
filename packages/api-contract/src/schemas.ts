@@ -1,3 +1,7 @@
+/**
+ * 前后端共享 API 契约（Zod schema + 推导类型）。
+ * 后端 parseSchema 校验入参；前端 fetch 后 .parse() 校验出参。改字段先改这里。
+ */
 import { z } from "zod";
 
 export const TaskStatusSchema = z.enum(["pending", "running", "succeeded", "failed"]);

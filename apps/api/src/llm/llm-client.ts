@@ -1,3 +1,9 @@
+/**
+ * LlmClient 接口：PlannerAgent 对模型的三次调用。
+ * - plan：决定是否 function calling
+ * - answerWithTool：拿工具结果组织自然语言（可 stream）
+ * - summarizeSession：把旧会话压成 summary 写回 sessions 表
+ */
 export interface ToolDefinition {
   name: string;
   description: string;

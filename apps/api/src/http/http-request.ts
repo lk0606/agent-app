@@ -1,3 +1,4 @@
+/** 原生 http 模块的 JSON 请求体解析与路径工具（未使用 Express/Fastify） */
 import type { IncomingMessage } from "node:http";
 
 import { AppError } from "../shared/app-error.js";

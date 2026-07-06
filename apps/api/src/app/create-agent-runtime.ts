@@ -1,3 +1,7 @@
+/**
+ * 依赖注入：把 Config、DB、LLM、Tools、Agent、TaskRunner 组装成可运行运行时。
+ * HTTP(server.ts) 与脚本(run-evals.ts) 都从这里拿同一套实例，保证行为一致。
+ */
 import { PlannerAgent } from "../agents/planner-agent.js";
 import type { AppConfig } from "../config/env.js";
 import { getDatabaseConfig } from "../db/connection-config.js";
@@ -23,6 +27,7 @@ export function createAgentRuntime(config: AppConfig) {
     model: config.hunyuanModel,
     baseURL: config.hunyuanBaseUrl,
   });
+  // 工具在 create-agent-runtime 注册；Planner 通过 function calling 按 name 选用
   const tools = [
     new TimeTool(),
     new HttpFetchTool({

@@ -1,3 +1,4 @@
+/** 内存版 MemoryStore：无 Postgres 时的测试替身，接口与 PostgresMemoryStore 一致 */
 import type { PlannerStepRecord, SessionRecord, TaskRecord, ToolCallRecord } from "./persistence-model.js";
 import type {
   MemoryMessage,

@@ -1,3 +1,7 @@
+/**
+ * 沙箱读文件：只能读 READ_FILE_ROOT_DIR 下的白名单扩展名。
+ * resolveSafePath 用 path.resolve + 前缀校验防 ../ 越界。
+ */
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
@@ -87,6 +91,7 @@ export class ReadFileTool implements Tool {
     const rootDir = path.resolve(this.options.rootDir);
     const absolutePath = path.resolve(rootDir, normalized);
 
+    // 必须落在 rootDir 子树内（防 ../../etc/passwd 类路径穿越）
     if (absolutePath !== rootDir && !absolutePath.startsWith(`${rootDir}${path.sep}`)) {
       throw new AppError("BAD_REQUEST", `ReadFileTool blocked path outside sandbox: ${relativePath}`);
     }

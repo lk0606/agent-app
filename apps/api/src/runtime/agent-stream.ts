@@ -1,3 +1,7 @@
+/**
+ * SSE 辅助：把 PlannerAgent 内部事件转成 AgentStreamEvent 帧。
+ * 仅 POST /agent/stream 会注入 emitStream；/agent/run 不走这里。
+ */
 import type { AgentStreamEvent } from "@agent-app/api-contract";
 import type { PlannerDecision } from "../llm/llm-client.js";
 
