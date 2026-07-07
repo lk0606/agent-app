@@ -3,6 +3,36 @@ import type { ServerResponse } from "node:http";
 
 import type { AppError } from "../shared/app-error.js";
 
+/** 把 AppError.details 里的字段级说明透出到 HTTP JSON（契约 ErrorResponseSchema.details） */
+export function buildErrorPayload(appError: AppError): {
+  error: {
+    code: AppError["code"];
+    message: string;
+    details?: string[];
+  };
+} {
+  const payload: {
+    code: AppError["code"];
+    message: string;
+    details?: string[];
+  } = {
+    code: appError.code,
+    message: appError.message,
+  };
+
+  if (
+    appError.details &&
+    typeof appError.details === "object" &&
+    "details" in appError.details &&
+    Array.isArray(appError.details.details) &&
+    appError.details.details.every((item) => typeof item === "string")
+  ) {
+    payload.details = appError.details.details;
+  }
+
+  return { error: payload };
+}
+
 export const HTTP_STATUS = {
   ok: 200,
   noContent: 204,

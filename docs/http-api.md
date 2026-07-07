@@ -50,6 +50,37 @@ POST /agent/run
 - 不传 `sessionId` 时，后端会自动创建一个 session。
 - 传入已有 `sessionId` 时，会复用该 session 的上下文。
 
+### 请求校验失败（400）
+
+body 不是合法 JSON：
+
+```json
+{
+  "error": {
+    "code": "BAD_REQUEST",
+    "message": "Request body must be valid JSON."
+  }
+}
+```
+
+字段名或类型不符合 `RunAgentRequestSchema`（契约在 `packages/api-contract`）：
+
+```json
+{
+  "error": {
+    "code": "BAD_REQUEST",
+    "message": "Request body is invalid.",
+    "details": [
+      "input: Invalid input: expected string, received number"
+    ]
+  }
+}
+```
+
+错字段名示例 `{"input1":"test"}` 还会在 `details` 里出现 `Unrecognized key: "input1"`（schema 使用 `.strict()`）。
+
+手测与原理见 [`docs/backend-learning/request-validation-errors.md`](backend-learning/request-validation-errors.md)。
+
 ## List Sessions
 
 ```http

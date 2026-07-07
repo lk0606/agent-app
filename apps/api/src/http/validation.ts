@@ -32,6 +32,6 @@ export function parseSchema<T>(schema: SafeParseSchema<T>, input: unknown, label
     return `${path}: ${issue.message}`;
   });
   const verb = label.endsWith("parameters") ? "are" : "is";
-
+  // details 经 buildErrorPayload 透出到 HTTP error.details，供 curl/前端定位字段错误
   throw new AppError("BAD_REQUEST", `${label} ${verb} invalid.`, { details });
 }

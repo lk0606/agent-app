@@ -49,10 +49,15 @@ packages/api-contract/
 {
   "error": {
     "code": "BAD_REQUEST",
-    "message": "Request body is invalid."
+    "message": "Request body is invalid.",
+    "details": [
+      "input: Invalid input: expected string, received number"
+    ]
   }
 }
 ```
+
+`details` 为可选字符串数组，来自 Zod `issues`（见 `apps/api/src/http/validation.ts`）。详细说明见 [`docs/backend-learning/request-validation-errors.md`](../backend-learning/request-validation-errors.md)。
 
 ## Frontend Usage
 

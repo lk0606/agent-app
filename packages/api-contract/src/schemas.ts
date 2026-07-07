@@ -99,11 +99,14 @@ export const AgentResultSchema = z.object({
   toolCalls: z.array(AgentToolCallSchema),
 });
 
-export const RunAgentRequestSchema = z.object({
-  sessionId: z.string().trim().min(1).optional(),
-  taskId: z.string().trim().min(1).optional(),
-  input: z.string().trim().min(1, "input must be a non-empty string"),
-});
+// strict：拒绝未知字段（如 input1），便于 400 的 details 准确提示拼写错误
+export const RunAgentRequestSchema = z
+  .object({
+    sessionId: z.string().trim().min(1).optional(),
+    taskId: z.string().trim().min(1).optional(),
+    input: z.string().trim().min(1, "input must be a non-empty string"),
+  })
+  .strict();
 
 export const RunAgentResponseSchema = z.object({
   sessionId: z.string(),
@@ -151,5 +154,7 @@ export const ErrorResponseSchema = z.object({
   error: z.object({
     code: z.string(),
     message: z.string(),
+    // Zod / 业务校验失败时的字段级说明，如 "input: expected string, received number"
+    details: z.array(z.string()).optional(),
   }),
 });

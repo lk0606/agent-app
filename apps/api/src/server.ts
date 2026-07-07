@@ -18,7 +18,7 @@ import { createServer } from "node:http";
 import { createAgentRuntime } from "./app/create-agent-runtime.js";
 import { loadConfig } from "./config/env.js";
 import { getPathSegments, readJsonBody } from "./http/http-request.js";
-import { HTTP_STATUS, statusForError, writeJson } from "./http/http-response.js";
+import { buildErrorPayload, HTTP_STATUS, statusForError, writeJson } from "./http/http-response.js";
 import { prepareAgentRun } from "./http/prepare-agent-run.js";
 import { endSseResponse, initSseResponse, writeSseEvent } from "./http/sse-response.js";
 import { parseSchema } from "./http/validation.js";
@@ -184,12 +184,7 @@ async function main(): Promise<void> {
         details: appError.details,
       });
 
-      writeJson(res, statusForError(appError.code), {
-        error: {
-          code: appError.code,
-          message: appError.message,
-        },
-      });
+      writeJson(res, statusForError(appError.code), buildErrorPayload(appError));
     }
   });
 
