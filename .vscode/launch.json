@@ -1,0 +1,103 @@
+{
+  "version": "0.2.0",
+  "inputs": [
+    {
+      "id": "replayTaskId",
+      "type": "promptString",
+      "description": "要回放的 taskId（eval 报告或 curl 响应里取）"
+    }
+  ],
+  "configurations": [
+    {
+      "name": "API: Debug HTTP Server",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/apps/api",
+      "program": "${workspaceFolder}/apps/api/src/server.ts",
+      "runtimeArgs": ["--import", "tsx"],
+      "console": "internalConsole",
+      "outputCapture": "std",
+      "internalConsoleOptions": "openOnSessionStart",
+      "stopOnEntry": false,
+      "preLaunchTask": "api-contract: build",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ],
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "HTTP server started",
+        "uriFormat": "http://localhost:3000/health"
+      },
+      "presentation": {
+        "group": "api",
+        "order": 1
+      }
+    },
+    {
+      "name": "API: Debug CLI Demo",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/apps/api",
+      "program": "${workspaceFolder}/apps/api/src/index.ts",
+      "runtimeArgs": ["--import", "tsx"],
+      "envFile": "${workspaceFolder}/apps/api/.env",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "preLaunchTask": "api-contract: build",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "presentation": {
+        "group": "api",
+        "order": 2
+      }
+    },
+    {
+      "name": "API: Debug Evals",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/apps/api",
+      "program": "${workspaceFolder}/apps/api/src/scripts/run-evals.ts",
+      "runtimeArgs": ["--import", "tsx"],
+      "envFile": "${workspaceFolder}/apps/api/.env",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "preLaunchTask": "api-contract: build",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "presentation": {
+        "group": "api",
+        "order": 3
+      }
+    },
+    {
+      "name": "API: Debug Task Replay",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/apps/api",
+      "program": "${workspaceFolder}/apps/api/src/scripts/replay-task.ts",
+      "runtimeArgs": ["--import", "tsx"],
+      "args": ["--", "${input:replayTaskId}"],
+      "envFile": "${workspaceFolder}/apps/api/.env",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "presentation": {
+        "group": "api",
+        "order": 4
+      }
+    },
+    {
+      "name": "API: Attach (port 9229)",
+      "type": "node",
+      "request": "attach",
+      "port": 9229,
+      "restart": true,
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "presentation": {
+        "group": "api",
+        "order": 5
+      }
+    }
+  ]
+}

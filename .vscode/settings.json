@@ -1,0 +1,6 @@
+{
+  "debug.javascript.autoAttachFilter": "disabled",
+  "debug.javascript.autoAttachMode": "onlyWithFlag",
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true
+}
