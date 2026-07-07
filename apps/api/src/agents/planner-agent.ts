@@ -31,21 +31,22 @@ export class PlannerAgent implements Agent {
     },
   ) {}
 
-  // 执行一次 agent 规划循环：模型决定是否用工具，工具结果再回到模型生成最终回答。
+  // Agent 核心循环：每轮 llm.plan → 可选工具 → 生成 finalAnswer；落库 planner_steps / tool_calls / messages
   async plan(request: AgentRequest, context: AgentContext): Promise<AgentResponse> {
+    // 0. 有 session 时：旧消息 summarize + 最近 N 条原文，供本轮 LLM 上下文
     const sessionContext = request.sessionId
       ? await this.buildSessionContext(request, context)
       : { recentHistory: [] as LlmConversationMessage[], sessionSummary: null as string | null };
     const toolCalls: AgentResponse["toolCalls"] = [];
     let finalAnswer = "";
-    const streamedFlag = { value: false };
+    const streamedFlag = { value: false }; // answerWithTool 是否已推过 token（SSE 用）
 
     for (let step = 0; step < this.options.maxSteps; step += 1) {
       const stepNumber = step + 1;
       const stepStartedAt = Date.now();
       const stepCreatedAt = new Date(stepStartedAt).toISOString();
 
-      // plan() 期间 UI 只显示通用 loading；决策内容在 planner_decision 事件里展示。
+      // A. 问 LLM：本轮要不要工具、调哪个
       const decision = await context.llm.plan({
         sessionSummary: sessionContext.sessionSummary,
         conversationHistory: sessionContext.recentHistory,
@@ -69,8 +70,8 @@ export class PlannerAgent implements Agent {
         toolName: decision.toolName,
       });
 
+      // 写 planner_steps（规划决策链 → GET /tasks plannerTrace）
       const recordStep = async (input: Omit<RecordPlannerStepInput, "taskId" | "step" | "createdAt">) => {
-        // 与 tool_calls 不同：这里记录的是「规划决策」，不是工具执行结果（见 GET /tasks plannerTrace）。
         await context.memory.recordPlannerStep({
           taskId: request.taskId,
           step: stepNumber,
@@ -79,8 +80,9 @@ export class PlannerAgent implements Agent {
         });
       };
 
+      // B. 不需要工具 → outcome: direct_answer
       if (!decision.needsTool || !decision.toolName) {
-        // 已有工具结果时走 answerWithTool 真流式，而不是 plan() 返回的 draftAnswer。
+        // 若本轮已调过工具，用 answerWithTool；否则用 plan 返回的 draftAnswer
         if (toolCalls.length > 0) {
           finalAnswer = await this.answerFromToolResult(
             context,
@@ -105,6 +107,7 @@ export class PlannerAgent implements Agent {
         break;
       }
 
+      // C. 工具预算用尽 → outcome: budget_exceeded
       if (toolCalls.length >= this.options.toolCallBudget) {
         context.logger.info("Tool budget reached", {
           toolCallBudget: this.options.toolCallBudget,
@@ -128,6 +131,7 @@ export class PlannerAgent implements Agent {
         }
       }
 
+      // D. 解析工具名，找不到则抛 TOOL_ERROR
       const tool = context.tools.find((item) => item.name === decision.toolName);
 
       if (!tool) {
@@ -137,6 +141,7 @@ export class PlannerAgent implements Agent {
       const toolInput = decision.toolInput ?? request.input;
       const existingCall = toolCalls.find((call) => call.toolName === tool.name && call.input === toolInput);
 
+      // E. 重复工具调用 → outcome: duplicate_skipped
       if (existingCall) {
         context.logger.info("Duplicate tool call skipped", {
           step: stepNumber,
@@ -174,6 +179,7 @@ export class PlannerAgent implements Agent {
       const startedAt = new Date().toISOString();
 
       try {
+        // F. 执行工具 → outcome: tool_executed（成功路径）
         const toolOutput = await tool.execute({
           input: toolInput,
         });
@@ -190,6 +196,7 @@ export class PlannerAgent implements Agent {
           timestamp: new Date().toISOString(),
         });
 
+        // 写 tool_calls（实际执行记录 → GET /tasks toolCalls）
         await context.memory.recordToolCall({
           taskId: request.taskId,
           step: stepNumber,
@@ -235,6 +242,7 @@ export class PlannerAgent implements Agent {
         );
         break;
       } catch (error: unknown) {
+        // G. 工具失败 → outcome: tool_failed，向上抛出让 TaskRunner 标 failed
         const errorCode = error instanceof AppError ? error.code : "TOOL_ERROR";
         const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -275,6 +283,7 @@ export class PlannerAgent implements Agent {
       }
     }
 
+    // H. 循环结束仍无回答 → outcome: fallback_answer（maxSteps 兜底）
     if (!finalAnswer) {
       const lastCall = toolCalls[toolCalls.length - 1];
 
@@ -302,11 +311,12 @@ export class PlannerAgent implements Agent {
       });
     }
 
+    // I. 未走真流式时，把 finalAnswer 切片推 token（仅 /agent/stream）
     if (context.emitStream && !streamedFlag.value && finalAnswer) {
-      // plan() 直接返回 draftAnswer 时 LLM 未走 stream，用切片 fallback。
       await emitTokenStream(context.emitStream, request.taskId, finalAnswer);
     }
 
+    // J. 写 assistant 消息，返回给 TaskRunner → HTTP result.summary
     await context.memory.append(request.taskId, {
       role: "assistant",
       content: finalAnswer,

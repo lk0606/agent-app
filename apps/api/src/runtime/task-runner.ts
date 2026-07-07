@@ -22,13 +22,17 @@ export interface TaskRunnerDeps {
 export class TaskRunner {
   constructor(private readonly deps: TaskRunnerDeps) {}
 
-  // 托管一次任务的生命周期：建任务、写用户消息、运行 agent、落最终状态。
+  /**
+   * 托管一次任务的生命周期：建任务 → 写用户消息 → 跑 Agent → 落最终状态。
+   * emitStream 仅 POST /agent/stream 注入，用于 SSE 推送进行中事件；/agent/run 不传。
+   */
   async run(request: AgentRequest, options?: { emitStream?: StreamEmitter }): Promise<AgentResponse> {
     const logger = this.deps.logger.child({ taskId: request.taskId });
 
     logger.info("Task started", { input: request.input });
 
     try {
+      // 1. tasks 表落一行 running，供 GET /tasks/:id 观测状态
       await this.deps.memory.createTask({
         id: request.taskId,
         sessionId: request.sessionId ?? null,
@@ -36,18 +40,21 @@ export class TaskRunner {
         status: "running",
       });
 
+      // 2. 有 session 时刷新 lastTaskAt，左栏列表按最近活动排序
       if (request.sessionId) {
         await this.deps.memory.updateSession(request.sessionId, {
           lastTaskAt: new Date().toISOString(),
         });
       }
 
+      // 3. messages 表写入本轮 user 消息，Planner 读历史上下文用
       await this.deps.memory.append(request.taskId, {
         role: "user",
         content: request.input,
         timestamp: new Date().toISOString(),
       });
 
+      // 4. 核心：Planner 循环（plan → 可选工具 → answer）；emitStream 透传给 SSE
       const result = await this.deps.agent.plan(request, {
         tools: this.deps.tools,
         memory: this.deps.memory,
@@ -64,6 +71,7 @@ export class TaskRunner {
         toolCallCount: result.toolCalls.length,
       });
 
+      // 5. 成功收尾：tasks.status=succeeded，写入 summary
       await this.deps.memory.updateTask(request.taskId, {
         status: "succeeded",
         summary: result.summary,
@@ -74,6 +82,7 @@ export class TaskRunner {
     } catch (error: unknown) {
       const appError = classifyError(error);
 
+      // 6. 失败收尾：tasks.status=failed，记录 errorCode/errorMessage 供调试面板
       await this.deps.memory.updateTask(request.taskId, {
         status: "failed",
         errorCode: appError.code,

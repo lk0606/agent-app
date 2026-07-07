@@ -17,14 +17,19 @@ export class HunyuanLlmClient implements LlmClient {
     });
   }
 
-  // 规划阶段只回答“是否需要工具、用哪个工具、输入是什么”，不直接执行业务逻辑。
+  /**
+   * 第一次 LLM 调用：function calling 决定要不要工具。
+   * 返回 PlannerDecision 给 PlannerAgent.plan() 的 A 步，不执行工具本身。
+   */
   async plan(input: PlanRequest): Promise<PlannerDecision> {
     try {
+      // 1. 调混元 chat.completions：system 规则 + user 上下文 + tools 定义
       const completion = await this.client.chat.completions.create({
         model: this.options.model,
         messages: [
           {
             role: "system",
+            // 规划专用 system prompt：何时该调 time / http_fetch / read_file
             content: [
               "You are a minimal Node agent planner.",
               "Use a tool only when it materially improves accuracy.",
@@ -36,9 +41,11 @@ export class HunyuanLlmClient implements LlmClient {
           },
           {
             role: "user",
+            // session 摘要 + 最近对话 + 本轮 input + 工具列表 + 本轮已执行工具结果
             content: this.buildPlannerInput(input),
           },
         ],
+        // 2. 把注册工具转成 OpenAI function schema（统一参数 { input: string }）
         tools: input.tools.map((tool) => ({
           type: "function",
           function: {
@@ -60,9 +67,11 @@ export class HunyuanLlmClient implements LlmClient {
         tool_choice: "auto",
       });
 
+      // 3. 解析模型回复：有 tool_calls → 要工具；否则 → 直接回答
       const message = completion.choices[0]?.message;
       const toolCall = message?.tool_calls?.[0];
 
+      // 4a. 模型选了 function → needsTool=true，交给 PlannerAgent 去 execute
       if (toolCall?.type === "function") {
         const parsedArgs = this.parseToolArguments(toolCall.function.arguments);
 
@@ -74,6 +83,7 @@ export class HunyuanLlmClient implements LlmClient {
         };
       }
 
+      // 4b. 无 tool_call → needsTool=false，draftAnswer 即最终回答（或后续 answerWithTool 的输入）
       return {
         needsTool: false,
         toolName: null,
