@@ -16,6 +16,7 @@
 | [http-request-body.md](./http-request-body.md) | `req` vs `body`；`readJsonBody` 读流；Zod 校验 |
 | [debug-http-server.md](./debug-http-server.md) | Cursor/VS Code 调试 `server.ts`；常见启动失败 |
 | [request-validation-errors.md](./request-validation-errors.md) | 400 `BAD_REQUEST` 与 `error.details` 工程化 |
+| [eval-break-lab.md](./eval-break-lab.md) | E.6-A：故意改坏 + 看 eval 抓回归 |
 
 ## 建议阅读顺序
 

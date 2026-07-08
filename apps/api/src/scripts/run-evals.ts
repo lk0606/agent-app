@@ -25,9 +25,19 @@ interface EvalCase {
   expectedTools?: string[];
   forbiddenTools?: string[];
   expectedKeywords?: string[];
+  /** 最终回答里不得出现这些词（小写比较），用于防幻觉泄露等 */
+  forbiddenKeywords?: string[];
   expectedErrorCode?: string;
   expectedTaskStatus?: "succeeded" | "failed";
+  /** 仅统计 status=succeeded 的工具次数；失败尝试（如安全拦截）不计入 */
   maxToolCalls?: number;
+}
+
+interface EvalToolCallSnapshot {
+  toolName: string;
+  input: string;
+  output: string;
+  status: "succeeded" | "failed";
 }
 
 interface EvalCaseResult {
@@ -39,11 +49,7 @@ interface EvalCaseResult {
   summary: string | null;
   taskStatus: "succeeded" | "failed";
   errorCode: string | null;
-  toolCalls: Array<{
-    toolName: string;
-    input: string;
-    output: string;
-  }>;
+  toolCalls: EvalToolCallSnapshot[];
 }
 
 const apiRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -69,15 +75,26 @@ async function main(): Promise<void> {
     let toolCalls: EvalCaseResult["toolCalls"] = [];
     let taskStatus: EvalCaseResult["taskStatus"] = "succeeded";
     let errorCode: string | null = null;
+    let assertTaskId = taskId;
 
     try {
       const result = await runEvalCase(testCase, taskId, runner, memory);
 
       summary = result.summary;
       toolCalls = result.toolCalls;
+      assertTaskId = result.assertTaskId;
     } catch (error: unknown) {
       taskStatus = "failed";
       errorCode = classifyError(error).code;
+
+      // 工具失败时 Planner 会 throw，内存 toolCalls 为空；从 DB 还原含 failed 的尝试记录。
+      if (toolCalls.length === 0) {
+        toolCalls = await loadToolCallsFromDb(memory, assertTaskId);
+      }
+    }
+
+    if (toolCalls.length === 0) {
+      toolCalls = await loadToolCallsFromDb(memory, assertTaskId);
     }
 
     const durationMs = Date.now() - startedAt;
@@ -144,23 +161,30 @@ async function loadCases(filePath: string): Promise<EvalCase[]> {
   return cases;
 }
 
+interface RunEvalCaseResult {
+  summary: string | null;
+  toolCalls: EvalToolCallSnapshot[];
+  assertTaskId: string;
+}
+
 async function runEvalCase(
   testCase: EvalCase,
   taskId: string,
   runner: ReturnType<typeof createAgentRuntime>["runner"],
   memory: ReturnType<typeof createAgentRuntime>["memory"],
-): Promise<AgentResponse> {
+): Promise<RunEvalCaseResult> {
   if (testCase.steps) {
     // 多轮：共用同一 sessionId，每轮独立 taskId；断言只看最后一轮的 summary / toolCalls。
     const sessionId = randomUUID();
     await memory.createSession({ id: sessionId });
 
     let lastResult: AgentResponse | null = null;
+    let assertTaskId = taskId;
 
     for (const [index, stepInput] of testCase.steps.entries()) {
-      const stepTaskId = `${taskId}-step-${index + 1}`;
+      assertTaskId = `${taskId}-step-${index + 1}`;
       lastResult = await runner.run({
-        taskId: stepTaskId,
+        taskId: assertTaskId,
         sessionId,
         input: stepInput,
       });
@@ -170,24 +194,49 @@ async function runEvalCase(
       throw new Error(`Eval case "${testCase.id}" steps produced no result.`);
     }
 
-    return lastResult;
+    return {
+      summary: lastResult.summary,
+      toolCalls: lastResult.toolCalls.map((call) => ({ ...call, status: "succeeded" as const })),
+      assertTaskId,
+    };
   }
 
-  return runner.run({
+  const result = await runner.run({
     taskId,
     input: testCase.input!,
   });
+
+  return {
+    summary: result.summary,
+    toolCalls: result.toolCalls.map((call) => ({ ...call, status: "succeeded" as const })),
+    assertTaskId: taskId,
+  };
+}
+
+async function loadToolCallsFromDb(
+  memory: ReturnType<typeof createAgentRuntime>["memory"],
+  taskId: string,
+): Promise<EvalToolCallSnapshot[]> {
+  const records = await memory.listTaskToolCalls(taskId);
+
+  return records.map((record) => ({
+    toolName: record.toolName,
+    input: record.toolInput,
+    output: record.toolOutput ?? record.errorMessage ?? "",
+    status: record.status === "succeeded" ? "succeeded" : "failed",
+  }));
 }
 
 function evaluateCase(
   testCase: EvalCase,
   summary: string | null,
-  toolCalls: Array<{ toolName: string; input: string; output: string }>,
+  toolCalls: EvalToolCallSnapshot[],
   taskStatus: "succeeded" | "failed",
   errorCode: string | null,
 ): string[] {
   const failures: string[] = [];
   const toolNames = toolCalls.map((item) => item.toolName);
+  const succeededToolCalls = toolCalls.filter((item) => item.status === "succeeded");
   const normalizedSummary = (summary ?? "").toLowerCase();
 
   if (testCase.expectedTaskStatus && taskStatus !== testCase.expectedTaskStatus) {
@@ -216,8 +265,16 @@ function evaluateCase(
     }
   }
 
-  if (typeof testCase.maxToolCalls === "number" && toolCalls.length > testCase.maxToolCalls) {
-    failures.push(`Tool call count ${toolCalls.length} exceeded limit ${testCase.maxToolCalls}.`);
+  for (const keyword of testCase.forbiddenKeywords ?? []) {
+    if (normalizedSummary.includes(keyword.toLowerCase())) {
+      failures.push(`Forbidden keyword "${keyword}" was found in summary.`);
+    }
+  }
+
+  if (typeof testCase.maxToolCalls === "number" && succeededToolCalls.length > testCase.maxToolCalls) {
+    failures.push(
+      `Successful tool call count ${succeededToolCalls.length} exceeded limit ${testCase.maxToolCalls}.`,
+    );
   }
 
   return failures;

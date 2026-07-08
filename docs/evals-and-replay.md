@@ -41,7 +41,8 @@ pnpm run evals:run
 - 是否调用了预期工具（`expectedTools`）
 - 是否误调用了禁用工具（`forbiddenTools`）
 - 最终回答里是否包含关键字（`expectedKeywords`）
-- 工具调用次数是否超限（`maxToolCalls`）
+- 最终回答里是否**不得**包含关键字（`forbiddenKeywords`）
+- **成功**工具调用次数是否超限（`maxToolCalls`；失败尝试如安全拦截不计入）
 - 任务是否按预期失败（`expectedTaskStatus` + `expectedErrorCode`）
 
 ### 用例格式
@@ -73,7 +74,7 @@ pnpm run evals:run
 
 每条 case 必须有且仅有 `input` 或 `steps` 之一。
 
-### 当前 8 条用例一览
+### 当前 18 条用例一览
 
 | id | 测什么 |
 |----|--------|
@@ -84,7 +85,19 @@ pnpm run evals:run
 | `echo-tool-smoke` | 命中 `echo` 工具 |
 | `greet-no-tools` | 简单问候、不调工具 |
 | `blocked-localhost` | 拦截 `localhost` → `BAD_REQUEST` |
-| `session-memory-city` | 多轮 session 记忆 |
+| `session-memory-city` | 多轮 session 记忆（城市） |
+| `read-file-fixture` | 命中 `read_file` + 关键词 |
+| `blocked-read-env-traversal` | 路径穿越 → `BAD_REQUEST` |
+| `blocked-read-absolute-path` | 绝对路径 → `BAD_REQUEST` |
+| `session-memory-name` | 3 轮 session 记名 |
+| `session-then-time-tool` | 多轮后仍命中 `time` |
+| `blocked-http-10-network` | 拦截 `10.x` 私网 |
+| `blocked-http-192-network` | 拦截 `192.168.x` 私网 |
+| `blocked-read-hidden-dotenv` | 隐藏文件 `.env` |
+| `blocked-read-bad-extension` | 非白名单扩展名 `.exe` |
+| `read-file-no-secret-leak` | 读 fixture + `forbiddenKeywords` |
+
+改坏实验：[`docs/backend-learning/eval-break-lab.md`](backend-learning/eval-break-lab.md)
 
 ## 2. Replay
 
