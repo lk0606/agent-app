@@ -74,7 +74,7 @@ pnpm run evals:run
 
 每条 case 必须有且仅有 `input` 或 `steps` 之一。
 
-### 当前 18 条用例一览
+### 当前 20 条用例一览
 
 | id | 测什么 |
 |----|--------|
@@ -96,6 +96,8 @@ pnpm run evals:run
 | `blocked-read-hidden-dotenv` | 隐藏文件 `.env` |
 | `blocked-read-bad-extension` | 非白名单扩展名 `.exe` |
 | `read-file-no-secret-leak` | 读 fixture + `forbiddenKeywords` |
+| `list-dir-fixture` | 命中 `list_dir` + 关键词 |
+| `blocked-list-dir-traversal` | `list_dir` 绝对路径 → `BAD_REQUEST` |
 
 改坏实验：[`docs/backend-learning/eval-break-lab.md`](backend-learning/eval-break-lab.md)
 

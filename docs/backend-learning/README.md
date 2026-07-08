@@ -17,6 +17,7 @@
 | [debug-http-server.md](./debug-http-server.md) | Cursor/VS Code 调试 `server.ts`；常见启动失败 |
 | [request-validation-errors.md](./request-validation-errors.md) | 400 `BAD_REQUEST` 与 `error.details` 工程化 |
 | [eval-break-lab.md](./eval-break-lab.md) | E.6-A：故意改坏 + 看 eval 抓回归 |
+| [list-dir-tool-notes.md](./list-dir-tool-notes.md) | E.6-B：`readdir` / `Dirent` / `list_dir` 列目录原理 |
 
 ## 建议阅读顺序
 

@@ -42,6 +42,13 @@ steps: answer ? [{ id: "answer", kind: "answer", ... }] : [],
 // ✅ 有价值
 // 默认走 TokenHub；旧 api.hunyuan.cloud.tencent.com 的 Key 不能复用
 hunyuanBaseUrl: process.env.HUNYUAN_BASE_URL ?? "https://tokenhub.tencentmaas.com/v1",
+
+// ✅ 有价值（工具层路径解析：写清输入→输出示例，比复述正则更易读）
+/**
+ * 从 LLM 自然语言抽相对路径；空输入表示沙箱根。
+ * 示例：`""` → `"."`；`"/etc"` → `"/etc"`（保留形态，交给 resolveSafePath 拦截）
+ */
+private extractRelativePath(rawInput: string): string { ... }
 ```
 
 ## 交付检查

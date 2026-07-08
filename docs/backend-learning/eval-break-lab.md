@@ -1,7 +1,7 @@
 # Eval 改坏实验（E.6-A 动手）
 
 > 目标：故意改坏一处行为，确认 `pnpm run evals:run` 能**抓住回归**。  
-> 前置：数据库已启动，`evals:run` 当前 **18 条全绿**（见 `basic-agent-cases.json`）。
+> 前置：数据库已启动，`evals:run` 当前 **20 条全绿**（见 `basic-agent-cases.json`）。
 
 ---
 
@@ -25,10 +25,10 @@ pnpm run db:migrate
 pnpm run evals:run
 ```
 
-- 会顺序跑 **18 条** case，每条都调真实 LLM，全程大约 **1–2 分钟**。
+- 会顺序跑 **20 条** case，每条都调真实 LLM，全程大约 **1–2 分钟**。
 - 过程中终端会刷很多 `"message": "Eval case started/finished"` 日志，**属正常**，等命令结束即可。
 
-### 3. 看 `passed: 18, failed: 0` 的三种方式
+### 3. 看 `passed: 20, failed: 0` 的三种方式
 
 **方式 A — 看退出码（最快）**
 
@@ -37,7 +37,7 @@ pnpm run evals:run
 echo $?
 ```
 
-- 输出 `0` → 全绿（18 passed / 0 failed）
+- 输出 `0` → 全绿（20 passed / 0 failed）
 - 输出 `1` → 至少一条失败
 
 **方式 B — 读最新报告文件（推荐，最清晰）**
@@ -51,8 +51,8 @@ jq '{total, passed, failed}' "$(ls -t apps/api/evals/reports/eval-run-*.json | h
 
 ```json
 {
-  "total": 18,
-  "passed": 18,
+  "total": 20,
+  "passed": 20,
   "failed": 0
 }
 ```
@@ -65,8 +65,8 @@ jq '{total, passed, failed}' "$(ls -t apps/api/evals/reports/eval-run-*.json | h
 {
   "reportPath": "/.../apps/api/evals/reports/eval-run-1730....json",
   "createdAt": "...",
-  "total": 18,
-  "passed": 18,
+  "total": 20,
+  "passed": 20,
   "failed": 0,
   "results": [ ... ]
 }
@@ -77,7 +77,7 @@ jq '{total, passed, failed}' "$(ls -t apps/api/evals/reports/eval-run-*.json | h
 ### 4. 改坏实验的标准循环
 
 ```text
-① pnpm run evals:run          → 确认全绿（passed: 18）
+① pnpm run evals:run          → 确认全绿（passed: 20）
 ② 按下面某一实验改代码
 ③ pnpm run evals:run          → 确认目标 case fail（failed ≥ 1，exit code 1）
 ④ git checkout -- <文件> 或手动还原
@@ -98,14 +98,14 @@ pnpm run task:replay -- <上一步看到的 taskId>
 ```bash
 pnpm run evals:run
 jq '{total, passed, failed}' "$(ls -t apps/api/evals/reports/eval-run-*.json | head -1)"
-# 预期：passed: 18, failed: 0
+# 预期：passed: 20, failed: 0
 ```
 
 ---
 
 ## 重要：为什么只注释 prompt 往往「全绿」？
 
-你注释了 `hunyuan-llm-client.ts` 第 36 行 time 那句，eval 仍 **18/18** —— **正常**。
+你注释了 `hunyuan-llm-client.ts` 里 time 那句，eval 仍 **20/20** —— **正常**。
 
 原因：`plan()` 的 user 消息里仍有 `Available tools:\n- time: ...`（工具描述），模型不依赖那行 system prompt 也会选 `time`。
 
@@ -321,6 +321,23 @@ git checkout -- apps/api/src/app/create-agent-runtime.ts
 
 ---
 
+## 实验 7（可选）：摘掉 `list_dir`（测沙箱列目录）
+
+**文件：** `apps/api/src/app/create-agent-runtime.ts`
+
+**注释整个 `new ListDirTool({ ... }),` 块（含结尾逗号）。**
+
+**预期变红：**
+
+| case id |
+|---------|
+| `list-dir-fixture` |
+| `blocked-list-dir-traversal` |
+
+**还原：** `git checkout -- apps/api/src/app/create-agent-runtime.ts`
+
+---
+
 ## 全部实验做完后
 
 ```bash
@@ -331,7 +348,7 @@ git checkout -- apps/api/src/app/create-agent-runtime.ts \
 
 pnpm run evals:run
 jq '{total, passed, failed}' "$(ls -t apps/api/evals/reports/eval-run-*.json | head -1)"
-# 必须回到 passed: 18, failed: 0
+# 必须回到 passed: 20, failed: 0
 ```
 
 ---
@@ -378,4 +395,4 @@ pnpm run task:replay -- <taskId>
 |------|------|
 | [evals-and-replay.md](../evals-and-replay.md) | 用例格式、命令 |
 | [agent-core-flow.md](./agent-core-flow.md) | Eval 在全链路中的位置 |
-| `apps/api/evals/cases/basic-agent-cases.json` | 18 条用例源 |
+| `apps/api/evals/cases/basic-agent-cases.json` | 20 条用例源 |

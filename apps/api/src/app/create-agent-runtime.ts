@@ -12,6 +12,7 @@ import { TaskRunner } from "../runtime/task-runner.js";
 import { createLogger } from "../shared/logger.js";
 import { EchoTool } from "../tools/echo-tool.js";
 import { HttpFetchTool } from "../tools/http-fetch-tool.js";
+import { ListDirTool } from "../tools/list-dir-tool.js";
 import { ReadFileTool } from "../tools/read-file-tool.js";
 import { TimeTool } from "../tools/time-tool.js";
 
@@ -45,6 +46,11 @@ export function createAgentRuntime(config: AppConfig) {
       maxBytes: config.readFileMaxBytes,
       allowedExtensions: config.readFileAllowedExtensions,
       deniedBasenames: config.readFileDeniedBasenames,
+    }),
+    // list_dir 与 read_file 共用沙箱根目录；注册后须重启 dev:server 才进 HTTP 进程
+    new ListDirTool({
+      rootDir: config.readFileRootDir,
+      maxEntries: config.listDirMaxEntries,
     }),
   ];
   const agent = new PlannerAgent({

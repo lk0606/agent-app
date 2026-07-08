@@ -29,13 +29,15 @@ export class HunyuanLlmClient implements LlmClient {
         messages: [
           {
             role: "system",
-            // 规划专用 system prompt：何时该调 time / http_fetch / read_file
+            // 规划专用 system prompt：何时该调 time / http_fetch / read_file / list_dir
             content: [
               "You are a minimal Node agent planner.",
               "Use a tool only when it materially improves accuracy.",
               "If the user asks for current date or time, call the time tool.",
               "If the user asks to open, read, summarize, or inspect a URL, call the http_fetch tool.",
               "If the user asks to read a local text file or project document, call the read_file tool with a relative sandbox path.",
+              // 工具名须与 create-agent-runtime 注册的 name 一致，否则模型看不到 function
+              "If the user asks to list, browse, or enumerate files in the sandbox directory, call the list_dir tool with a relative path or empty input for the root.",
               "If previous tool results are already sufficient, answer directly instead of calling the same tool repeatedly.",
             ].join(" "),
           },

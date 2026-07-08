@@ -27,6 +27,8 @@ export interface AppConfig {
   readFileMaxBytes: number;
   readFileAllowedExtensions: string[];
   readFileDeniedBasenames: string[];
+  /** 与 read_file 共用 READ_FILE_ROOT_DIR；限制单次 listing 条数防输出过长 */
+  listDirMaxEntries: number;
   port: number;
 }
 
@@ -71,6 +73,8 @@ export function loadConfig(): AppConfig {
     readFileMaxBytes: readNumber("READ_FILE_MAX_BYTES", 8192),
     readFileAllowedExtensions: readList("READ_FILE_ALLOWED_EXTENSIONS", ".txt,.md,.json,.yaml,.yml"),
     readFileDeniedBasenames: readList("READ_FILE_DENIED_BASENAMES", ".env,.env.local,credentials.json"),
+    // list_dir 与 read_file 共用沙箱根目录，仅限制单次返回条目数
+    listDirMaxEntries: readNumber("LIST_DIR_MAX_ENTRIES", 50),
     port: readNumber("PORT", 3000),
   };
 }
