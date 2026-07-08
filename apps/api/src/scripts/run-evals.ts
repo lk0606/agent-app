@@ -1,6 +1,7 @@
 /**
  * Agent 端到端回归：`pnpm run evals:run`。
- * 读 evals/cases/*.json → 跑 TaskRunner → 断言工具/关键词/失败码 → 写 evals/reports/。
+ * 读 evals/cases 下单个 json（默认 basic-agent-cases.json）→ TaskRunner → 断言 → 写 evals/reports/。
+ * 用例增多、拆多文件时的策略见 docs/evals-and-replay.md §用例组织策略。
  */
 import "dotenv/config";
 
