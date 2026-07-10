@@ -29,6 +29,10 @@ export interface AppConfig {
   readFileDeniedBasenames: string[];
   /** 与 read_file 共用 READ_FILE_ROOT_DIR；限制单次 listing 条数防输出过长 */
   listDirMaxEntries: number;
+  /** search_docs 单次返回片段数；索引根目录同 READ_FILE_ROOT_DIR */
+  searchDocsMaxResults: number;
+  /** search_docs 切块最大字符数 */
+  searchDocsChunkChars: number;
   port: number;
 }
 
@@ -75,6 +79,8 @@ export function loadConfig(): AppConfig {
     readFileDeniedBasenames: readList("READ_FILE_DENIED_BASENAMES", ".env,.env.local,credentials.json"),
     // list_dir 与 read_file 共用沙箱根目录，仅限制单次返回条目数
     listDirMaxEntries: readNumber("LIST_DIR_MAX_ENTRIES", 50),
+    searchDocsMaxResults: readNumber("SEARCH_DOCS_MAX_RESULTS", 3),
+    searchDocsChunkChars: readNumber("SEARCH_DOCS_CHUNK_CHARS", 500),
     port: readNumber("PORT", 3000),
   };
 }

@@ -1,7 +1,7 @@
 # Eval 改坏实验（E.6-A 动手）
 
 > 目标：故意改坏一处行为，确认 `pnpm run evals:run` 能**抓住回归**。  
-> 前置：数据库已启动，`evals:run` 当前 **20 条全绿**（见 `basic-agent-cases.json`）。
+> 前置：数据库已启动，`evals:run` 当前 **22 条全绿**（见 `basic-agent-cases.json`）。
 
 ---
 
@@ -25,10 +25,10 @@ pnpm run db:migrate
 pnpm run evals:run
 ```
 
-- 会顺序跑 **20 条** case，每条都调真实 LLM，全程大约 **1–2 分钟**。
+- 会顺序跑 **22 条** case，每条都调真实 LLM，全程大约 **1–2 分钟**。
 - 过程中终端会刷很多 `"message": "Eval case started/finished"` 日志，**属正常**，等命令结束即可。
 
-### 3. 看 `passed: 20, failed: 0` 的三种方式
+### 3. 看 `passed: 22, failed: 0` 的三种方式
 
 **方式 A — 看退出码（最快）**
 
@@ -37,7 +37,7 @@ pnpm run evals:run
 echo $?
 ```
 
-- 输出 `0` → 全绿（20 passed / 0 failed）
+- 输出 `0` → 全绿（22 passed / 0 failed）
 - 输出 `1` → 至少一条失败
 
 **方式 B — 读最新报告文件（推荐，最清晰）**
@@ -51,8 +51,8 @@ jq '{total, passed, failed}' "$(ls -t apps/api/evals/reports/eval-run-*.json | h
 
 ```json
 {
-  "total": 20,
-  "passed": 20,
+  "total": 22,
+  "passed": 22,
   "failed": 0
 }
 ```
@@ -65,8 +65,8 @@ jq '{total, passed, failed}' "$(ls -t apps/api/evals/reports/eval-run-*.json | h
 {
   "reportPath": "/.../apps/api/evals/reports/eval-run-1730....json",
   "createdAt": "...",
-  "total": 20,
-  "passed": 20,
+  "total": 22,
+  "passed": 22,
   "failed": 0,
   "results": [ ... ]
 }
@@ -77,7 +77,7 @@ jq '{total, passed, failed}' "$(ls -t apps/api/evals/reports/eval-run-*.json | h
 ### 4. 改坏实验的标准循环
 
 ```text
-① pnpm run evals:run          → 确认全绿（passed: 20）
+① pnpm run evals:run          → 确认全绿（passed: 22）
 ② 按下面某一实验改代码
 ③ pnpm run evals:run          → 确认目标 case fail（failed ≥ 1，exit code 1）
 ④ git checkout -- <文件> 或手动还原
@@ -98,7 +98,7 @@ pnpm run task:replay -- <上一步看到的 taskId>
 ```bash
 pnpm run evals:run
 jq '{total, passed, failed}' "$(ls -t apps/api/evals/reports/eval-run-*.json | head -1)"
-# 预期：passed: 20, failed: 0
+# 预期：passed: 22, failed: 0
 ```
 
 ---
@@ -338,17 +338,44 @@ git checkout -- apps/api/src/app/create-agent-runtime.ts
 
 ---
 
+## 实验 6：`search_docs` 检索（E.7-A）
+
+**改什么：** `apps/api/src/llm/hunyuan-llm-client.ts` — 删掉 system prompt 里 `search_docs` 那一行规则。
+
+**重跑：**
+
+```bash
+pnpm run evals:run
+jq '.results[] | select(.id | startswith("search-docs")) | {id, passed, failures}' \
+  "$(ls -t apps/api/evals/reports/eval-run-*.json | head -1)"
+```
+
+**预期变红：**
+
+| case id | 典型 failures |
+|---------|----------------|
+| `search-docs-city` | `Expected tool "search_docs"` 或关键词缺失 |
+| `search-docs-japan-city` | 同上 |
+
+**还原：** `git checkout -- apps/api/src/llm/hunyuan-llm-client.ts`
+
+**变体（可选）：** 临时删掉 `evals/fixtures/travel-notes.md` → 仅 `search-docs-japan-city` fail（0 匹配 Osaka）。
+
+---
+
 ## 全部实验做完后
 
 ```bash
 git checkout -- apps/api/src/app/create-agent-runtime.ts \
   apps/api/src/tools/http-fetch-tool.ts \
   apps/api/src/tools/read-file-tool.ts \
+  apps/api/src/tools/search-docs-tool.ts \
+  apps/api/src/llm/hunyuan-llm-client.ts \
   apps/api/src/agents/planner-agent.ts
 
 pnpm run evals:run
 jq '{total, passed, failed}' "$(ls -t apps/api/evals/reports/eval-run-*.json | head -1)"
-# 必须回到 passed: 20, failed: 0
+# 必须回到 passed: 22, failed: 0
 ```
 
 ---
@@ -395,4 +422,4 @@ pnpm run task:replay -- <taskId>
 |------|------|
 | [evals-and-replay.md](../evals-and-replay.md) | 用例格式、命令 |
 | [agent-core-flow.md](./agent-core-flow.md) | Eval 在全链路中的位置 |
-| `apps/api/evals/cases/basic-agent-cases.json` | 20 条用例源 |
+| `apps/api/evals/cases/basic-agent-cases.json` | 22 条用例源 |

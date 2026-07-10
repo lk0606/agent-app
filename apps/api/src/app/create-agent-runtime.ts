@@ -14,6 +14,7 @@ import { EchoTool } from "../tools/echo-tool.js";
 import { HttpFetchTool } from "../tools/http-fetch-tool.js";
 import { ListDirTool } from "../tools/list-dir-tool.js";
 import { ReadFileTool } from "../tools/read-file-tool.js";
+import { SearchDocsTool } from "../tools/search-docs-tool.js";
 import { TimeTool } from "../tools/time-tool.js";
 
 export function createAgentRuntime(config: AppConfig) {
@@ -51,6 +52,14 @@ export function createAgentRuntime(config: AppConfig) {
     new ListDirTool({
       rootDir: config.readFileRootDir,
       maxEntries: config.listDirMaxEntries,
+    }),
+    // search_docs 与 read_file 共用沙箱与扩展名白名单；跨文件检索用本工具，路径明确用 read_file
+    new SearchDocsTool({
+      rootDir: config.readFileRootDir,
+      allowedExtensions: config.readFileAllowedExtensions,
+      deniedBasenames: config.readFileDeniedBasenames,
+      maxResults: config.searchDocsMaxResults,
+      chunkChars: config.searchDocsChunkChars,
     }),
   ];
   const agent = new PlannerAgent({

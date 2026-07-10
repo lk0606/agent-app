@@ -29,7 +29,7 @@ export class HunyuanLlmClient implements LlmClient {
         messages: [
           {
             role: "system",
-            // 规划专用 system prompt：何时该调 time / http_fetch / read_file / list_dir
+            // 规划专用 system prompt：何时该调 time / http_fetch / read_file / list_dir / search_docs
             content: [
               "You are a minimal Node agent planner.",
               "Use a tool only when it materially improves accuracy.",
@@ -38,6 +38,7 @@ export class HunyuanLlmClient implements LlmClient {
               "If the user asks to read a local text file or project document, call the read_file tool with a relative sandbox path.",
               // 工具名须与 create-agent-runtime 注册的 name 一致，否则模型看不到 function
               "If the user asks to list, browse, or enumerate files in the sandbox directory, call the list_dir tool with a relative path or empty input for the root.",
+              "If the user asks to search, find, or look up information across sandbox documents without a specific file path, call the search_docs tool with the query.",
               "If previous tool results are already sufficient, answer directly instead of calling the same tool repeatedly.",
             ].join(" "),
           },

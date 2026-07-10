@@ -142,4 +142,5 @@ curl -s http://localhost:3000/tasks/$TASK_ID | jq '{
 ## 相关文档
 
 - [http-request-body.md](./http-request-body.md) — run 之前的 body 解析
+- [tool-execution-chain.md](./tool-execution-chain.md) — Tool 选型、execute、落库专链
 - [consolidation-week.md](../consolidation-week.md) Day 1–2
