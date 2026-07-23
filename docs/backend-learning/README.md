@@ -21,6 +21,7 @@
 | [list-dir-tool-notes.md](./list-dir-tool-notes.md) | E.6-B：`readdir` / `Dirent` / `list_dir` 列目录原理 |
 | [lightweight-rag-plan.md](./lightweight-rag-plan.md) | **E.7：轻量 RAG 学习计划（阶段 1/2、自检清单）** |
 | [search-docs-tool-notes.md](./search-docs-tool-notes.md) | E.7-A：`search_docs` 切块与关键词检索 |
+| [embedding-cosine-notes.md](./embedding-cosine-notes.md) | E.7-B：Embedding + 余弦相似度（入参出参 / 分子分母野路子理解） |
 | [tool-execution-chain.md](./tool-execution-chain.md) | Tool 运行与调用链路；`plan` vs `execute`；读码与调试 |
 
 ## 建议阅读顺序

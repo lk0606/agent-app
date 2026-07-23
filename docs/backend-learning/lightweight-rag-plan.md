@@ -69,15 +69,15 @@ search_docs.execute(query)
 - pgvector / 持久化索引
 - 中文分词器（简单空格+字符切分够用）
 
-### 阶段 2：向量 RAG（E.7-B，未开始）
+### 阶段 2：向量 RAG（E.7-B，已完成）
 
-| 项 | 计划 |
+| 项 | 交付 |
 |----|------|
-| Embedding | 调 TokenHub / OpenAI 兼容 embedding API |
-| 存储 | Postgres 新表或 pgvector 扩展 |
-| 索引脚本 | `pnpm run rag:index` 离线建索引 |
-| 检索 | 余弦相似度 top-k；可与关键词 hybrid |
-| eval | 同义改写查询（「台北」vs「favorite city」） |
+| Embedding | `TokenHubEmbeddingClient` + `kinfra-text-embedding-0.6b` |
+| 存储 | `document_chunks` 表（JSONB embedding） |
+| 索引脚本 | `pnpm run rag:index` |
+| 检索 | `SEARCH_DOCS_MODE=vector\|hybrid`；余弦相似度 + 可选 hybrid |
+| eval | `search-docs-city-zh`（中文 query → 英文文档 Taipei） |
 
 阶段 2 开做前：阶段 1 eval 全绿 + 读完本文「阶段 1 自检」。
 
@@ -186,15 +186,15 @@ jq '{total, passed, failed}' "$(ls -t apps/api/evals/reports/eval-run-*.json | h
 
 ---
 
-## 阶段 2 预习（未开工，仅作回顾锚点）
+## 阶段 2 概念回顾（E.7-B 已完成）
 
-| 主题 | 要搞懂什么 |
-|------|------------|
-| Embedding | 文本 → 固定维向量；API 入参/出参 |
-| 余弦相似度 | 两向量夹角；比欧氏距离更常用 |
-| pgvector | Postgres 扩展；`<=>` 运算符 |
-| Hybrid | 关键词 + 向量各取 top-k 再 merge |
-| 索引更新 | fixture 变更后如何 reindex |
+| 主题 | 要搞懂什么 | 深读 |
+|------|------------|------|
+| Embedding | 文本 → 固定维向量；API 入参/出参 | [`embedding-cosine-notes.md`](./embedding-cosine-notes.md) |
+| 余弦相似度 | 两向量夹角；分子点积、分母抹长短 | 同上 |
+| Hybrid | 关键词 + 向量加权 merge | [`search-docs-tool-notes.md`](./search-docs-tool-notes.md) §E.7-B |
+| 索引更新 | fixture 变更后重跑 `pnpm run rag:index` | `rag-index.ts` |
+| pgvector | 可选下一跳；本仓库用 JSONB + 应用层余弦即可 | — |
 
 ---
 
@@ -204,6 +204,7 @@ jq '{total, passed, failed}' "$(ls -t apps/api/evals/reports/eval-run-*.json | h
 |------|------|
 | [`docs/current-status.md`](../current-status.md) | E.7 进度状态源 |
 | [`search-docs-tool-notes.md`](./search-docs-tool-notes.md) | 阶段 1 实现细节 |
+| [`embedding-cosine-notes.md`](./embedding-cosine-notes.md) | Embedding + 余弦相似度野路子理解 |
 | [`list-dir-tool-notes.md`](./list-dir-tool-notes.md) | 沙箱列目录（对照） |
 | [`eval-break-lab.md`](./eval-break-lab.md) | 改坏实验模板 |
 | [`docs/consolidation-week.md`](../consolidation-week.md) | E.6 结束后选 C 轻量 RAG 的出处 |

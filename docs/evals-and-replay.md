@@ -30,7 +30,29 @@ pnpm run db:check
 
 ```bash
 pnpm run evals:run
+# 只跑单条（按 case id）
+pnpm run evals:run -- --id search-docs-city
+# 跨语言那条需 vector|hybrid，且通常先 rag:index
+SEARCH_DOCS_MODE=hybrid pnpm run evals:run -- --id search-docs-city-zh
 ```
+
+### 调试单条向量检索（看余弦断点）
+
+`.vscode/launch.json` → **API: Debug Evals (vector · search-docs-city-zh)**
+
+前置：已跑过 `pnpm run rag:index`（`document_chunks` 非空）。
+
+**不要用 `envFile`：** 会把整份 `.env`（含 API Key）拼进 shell，命令过长被 zsh 截断，进程根本没起来，断点永远不进。配置已改为只靠脚本里的 `import "dotenv/config"` + `env.SEARCH_DOCS_MODE`。
+
+建议断点（按调用顺序）：
+
+| 顺序 | 文件 | 看什么 |
+|------|------|--------|
+| 1 | `tools/search-docs-tool.ts` | `embedTexts([query])` — query「台北」变向量 |
+| 2 | `rag/document-index.ts` | `searchVector` 里 `cosineSimilarity(...)` |
+| 3 | `rag/cosine-similarity.ts` | **`for` 循环或最后的 `return dot / denominator`**（不要断 early-return 那几行） |
+
+keyword 那条不会进 2/3；只有 `SEARCH_DOCS_MODE=vector|hybrid` 才会。
 
 输出结果会写到：
 
@@ -93,7 +115,7 @@ pnpm run evals:run
 |-------------|------|
 | **~30 条**，或单文件难找、改一类要滚很久 | **按主题拆文件**（推荐 2–3 个，不要每工具一文件）：`smoke-tools.json`、`security.json`、`memory.json` |
 | **~50+ 条**，或 CI 需要「只跑安全 / 只跑记忆」 | 在 case 上加可选 `tags`，`run-evals.ts` 支持 `--tag` 筛选 |
-| 任意阶段 | `pnpm run evals:run` **默认仍跑全量全绿**；局部调试可指定单个 json 路径 |
+| 任意阶段 | `pnpm run evals:run` **默认仍跑全量全绿**；局部调试用 `--id <caseId>` 或指定单个 json 路径 |
 
 **拆文件时必做（与 runner 对齐）**
 

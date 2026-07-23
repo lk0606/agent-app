@@ -14,6 +14,7 @@
     "db:inspect": "dotenv_config_path=.env tsx src/scripts/inspect-postgres.ts",
     "db:migrate": "dotenv_config_path=.env tsx src/scripts/migrate-postgres.ts",
     "evals:run": "dotenv_config_path=.env tsx src/scripts/run-evals.ts",
+    "rag:index": "dotenv_config_path=.env tsx src/scripts/rag-index.ts",
     "task:replay": "dotenv_config_path=.env tsx src/scripts/replay-task.ts",
     "check": "pnpm --filter @agent-app/api-contract build && tsc --noEmit -p tsconfig.json"
   },

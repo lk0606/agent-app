@@ -7,7 +7,9 @@ import type { AppConfig } from "../config/env.js";
 import { getDatabaseConfig } from "../db/connection-config.js";
 import { createPgPool } from "../db/pg-client.js";
 import { HunyuanLlmClient } from "../llm/hunyuan-llm-client.js";
+import { TokenHubEmbeddingClient } from "../llm/embedding-client.js";
 import { PostgresMemoryStore } from "../memory/postgres-memory-store.js";
+import { PostgresDocumentChunkStore } from "../rag/document-chunk-store.js";
 import { TaskRunner } from "../runtime/task-runner.js";
 import { createLogger } from "../shared/logger.js";
 import { EchoTool } from "../tools/echo-tool.js";
@@ -29,6 +31,15 @@ export function createAgentRuntime(config: AppConfig) {
     model: config.hunyuanModel,
     baseURL: config.hunyuanBaseUrl,
   });
+  const embeddingClient =
+    config.searchDocsMode === "keyword"
+      ? null
+      : new TokenHubEmbeddingClient({
+          apiKey: config.hunyuanApiKey,
+          model: config.hunyuanEmbeddingModel,
+          baseURL: config.hunyuanBaseUrl,
+        });
+  const chunkStore = config.searchDocsMode === "keyword" ? null : new PostgresDocumentChunkStore(pool);
   // 工具在 create-agent-runtime 注册；Planner 通过 function calling 按 name 选用
   const tools = [
     new TimeTool(),
@@ -53,13 +64,16 @@ export function createAgentRuntime(config: AppConfig) {
       rootDir: config.readFileRootDir,
       maxEntries: config.listDirMaxEntries,
     }),
-    // search_docs 与 read_file 共用沙箱与扩展名白名单；跨文件检索用本工具，路径明确用 read_file
+    // search_docs：keyword 仅内存切块；vector/hybrid 需先 pnpm run rag:index 写 document_chunks
     new SearchDocsTool({
       rootDir: config.readFileRootDir,
       allowedExtensions: config.readFileAllowedExtensions,
       deniedBasenames: config.readFileDeniedBasenames,
       maxResults: config.searchDocsMaxResults,
       chunkChars: config.searchDocsChunkChars,
+      searchMode: config.searchDocsMode,
+      embeddingClient,
+      chunkStore,
     }),
   ];
   const agent = new PlannerAgent({

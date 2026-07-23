@@ -60,10 +60,39 @@
       "cwd": "${workspaceFolder}/apps/api",
       "program": "${workspaceFolder}/apps/api/src/scripts/run-evals.ts",
       "runtimeArgs": ["--import", "tsx"],
-      "envFile": "${workspaceFolder}/apps/api/.env",
       "console": "integratedTerminal",
       "internalConsoleOptions": "neverOpen",
       "preLaunchTask": "api-contract: build",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ],
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "presentation": {
+        "group": "api",
+        "order": 3
+      }
+    },
+    {
+      "name": "API: Debug Evals (vector · search-docs-city-zh)",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/apps/api",
+      "program": "${workspaceFolder}/apps/api/src/scripts/run-evals.ts",
+      "runtimeArgs": ["--import", "tsx"],
+      "args": ["--id", "search-docs-city-zh"],
+      "env": {
+        "SEARCH_DOCS_MODE": "vector"
+      },
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "preLaunchTask": "api-contract: build",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ],
       "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
       "presentation": {
         "group": "api",

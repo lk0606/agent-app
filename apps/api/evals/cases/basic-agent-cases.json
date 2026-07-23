@@ -177,5 +177,14 @@
     "forbiddenTools": ["http_fetch", "read_file", "list_dir"],
     "expectedKeywords": ["Osaka"],
     "maxToolCalls": 1
+  },
+  {
+    "id": "search-docs-city-zh",
+    "input": "请用 search_docs 搜索文档里提到的台北，直接回答城市英文名。",
+    "expectedTools": ["search_docs"],
+    "forbiddenTools": ["http_fetch", "read_file", "list_dir"],
+    "expectedKeywords": ["Taipei"],
+    "maxToolCalls": 1,
+    "requiresSearchDocsMode": ["vector", "hybrid"]
   }
 ]

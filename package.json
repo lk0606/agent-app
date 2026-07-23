@@ -16,6 +16,7 @@
     "db:inspect": "pnpm --filter @agent-app/api db:inspect",
     "db:migrate": "pnpm --filter @agent-app/api db:migrate",
     "evals:run": "pnpm --filter @agent-app/api evals:run",
+    "rag:index": "pnpm --filter @agent-app/api rag:index",
     "start": "pnpm --filter @agent-app/api start",
     "start:server": "pnpm --filter @agent-app/api start:server",
     "task:replay": "pnpm --filter @agent-app/api task:replay",

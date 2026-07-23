@@ -33,6 +33,10 @@ export interface AppConfig {
   searchDocsMaxResults: number;
   /** search_docs 切块最大字符数 */
   searchDocsChunkChars: number;
+  /** search_docs 检索模式：keyword | vector | hybrid */
+  searchDocsMode: "keyword" | "vector" | "hybrid";
+  /** E.7-B embedding 模型；与 chat 共用 TokenHub baseURL */
+  hunyuanEmbeddingModel: string;
   port: number;
 }
 
@@ -81,6 +85,8 @@ export function loadConfig(): AppConfig {
     listDirMaxEntries: readNumber("LIST_DIR_MAX_ENTRIES", 50),
     searchDocsMaxResults: readNumber("SEARCH_DOCS_MAX_RESULTS", 3),
     searchDocsChunkChars: readNumber("SEARCH_DOCS_CHUNK_CHARS", 500),
+    searchDocsMode: readSearchDocsMode(process.env.SEARCH_DOCS_MODE),
+    hunyuanEmbeddingModel: process.env.HUNYUAN_EMBEDDING_MODEL ?? "kinfra-text-embedding-0.6b",
     port: readNumber("PORT", 3000),
   };
 }
@@ -108,4 +114,12 @@ function readList(name: string, fallback: string): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
+}
+
+function readSearchDocsMode(value: string | undefined): AppConfig["searchDocsMode"] {
+  if (value === "vector" || value === "hybrid" || value === "keyword") {
+    return value;
+  }
+
+  return "keyword";
 }

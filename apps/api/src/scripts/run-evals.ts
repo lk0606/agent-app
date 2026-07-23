@@ -1,6 +1,13 @@
 /**
  * Agent 端到端回归：`pnpm run evals:run`。
  * 读 evals/cases 下单个 json（默认 basic-agent-cases.json）→ TaskRunner → 断言 → 写 evals/reports/。
+ *
+ * CLI 示例：
+ *   pnpm run evals:run
+ *   pnpm run evals:run -- --id search-docs-city
+ *   pnpm run evals:run -- --id=search-docs-city-zh
+ *   pnpm run evals:run -- evals/cases/basic-agent-cases.json --id search-docs-city
+ *
  * 用例增多、拆多文件时的策略见 docs/evals-and-replay.md §用例组织策略。
  */
 import "dotenv/config";
@@ -11,9 +18,14 @@ import path from "node:path";
 
 import { randomUUID } from "node:crypto";
 
+import type { Pool } from "pg";
+
 import { createAgentRuntime } from "../app/create-agent-runtime.js";
 import { loadConfig } from "../config/env.js";
 import { verifyPgConnection } from "../db/pg-client.js";
+import { TokenHubEmbeddingClient } from "../llm/embedding-client.js";
+import { buildAndStoreDocumentIndex } from "../rag/build-document-index.js";
+import { PostgresDocumentChunkStore } from "../rag/document-chunk-store.js";
 import { classifyError } from "../shared/app-error.js";
 import type { AgentResponse } from "../agents/base-agent.js";
 
@@ -32,6 +44,8 @@ interface EvalCase {
   expectedTaskStatus?: "succeeded" | "failed";
   /** 仅统计 status=succeeded 的工具次数；失败尝试（如安全拦截）不计入 */
   maxToolCalls?: number;
+  /** 仅当 SEARCH_DOCS_MODE 为所列值之一时才跑该 case（如向量同义检索） */
+  requiresSearchDocsMode?: Array<"keyword" | "vector" | "hybrid">;
 }
 
 interface EvalToolCallSnapshot {
@@ -55,16 +69,90 @@ interface EvalCaseResult {
 
 const apiRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
+/** 解析 `evals:run` 的 argv：可选 cases 文件路径 + `--id <caseId>` / `--id=<caseId>` */
+function parseEvalCliArgs(argv: string[]): { casesPath: string | null; caseId: string | null } {
+  let casesPath: string | null = null;
+  let caseId: string | null = null;
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+
+    if (arg === undefined) {
+      continue;
+    }
+
+    // pnpm/npm 可能把分隔用的 `--` 原样传给脚本，直接忽略
+    if (arg === "--") {
+      continue;
+    }
+
+    if (arg === "--id") {
+      const value = argv[index + 1];
+
+      if (!value || value.startsWith("--")) {
+        throw new Error('Missing value for --id. Example: pnpm run evals:run -- --id search-docs-city');
+      }
+
+      caseId = value;
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--id=")) {
+      caseId = arg.slice("--id=".length);
+
+      if (caseId.length === 0) {
+        throw new Error('Empty --id=. Example: pnpm run evals:run -- --id=search-docs-city');
+      }
+
+      continue;
+    }
+
+    if (arg.startsWith("--")) {
+      throw new Error(`Unknown eval flag: ${arg}. Supported: --id <caseId>`);
+    }
+
+    // 第一个非 flag 参数当作 cases json 路径；其余位置参数拒绝，避免静默忽略
+    if (casesPath !== null) {
+      throw new Error(`Unexpected argument: ${arg}. Only one cases file path is allowed.`);
+    }
+
+    casesPath = arg;
+  }
+
+  return { casesPath, caseId };
+}
+
 async function main(): Promise<void> {
   const config = loadConfig();
   const { runner, logger, memory, pool } = createAgentRuntime(config);
 
   await verifyPgConnection(pool);
+  await ensureRagIndexIfNeeded(config, pool);
   // 未连上 DB 时 TaskRunner 会秒失败且 errorCode 全是 INTERNAL_ERROR，先预检便于排查。
-  const casesPath = process.argv[2] ?? path.join(apiRoot, "evals/cases/basic-agent-cases.json");
+  const { casesPath: casesPathArg, caseId } = parseEvalCliArgs(process.argv.slice(2));
+  const casesPath = casesPathArg ?? path.join(apiRoot, "evals/cases/basic-agent-cases.json");
   const reportDir = path.join(apiRoot, "evals/reports");
 
-  const cases = await loadCases(casesPath);
+  let cases = (await loadCases(casesPath)).filter((testCase) => shouldRunEvalCase(testCase, config.searchDocsMode));
+
+  // --id：只跑指定 case；找不到则直接失败（区分「模式 skip」与「id 写错」）
+  if (caseId) {
+    const matched = cases.filter((testCase) => testCase.id === caseId);
+
+    if (matched.length === 0) {
+      const allIds = (await loadCases(casesPath)).map((item) => item.id);
+      const known = allIds.includes(caseId);
+      throw new Error(
+        known
+          ? `Eval case "${caseId}" is skipped for SEARCH_DOCS_MODE=${config.searchDocsMode}. Try vector|hybrid.`
+          : `Eval case "${caseId}" not found in ${casesPath}. Known ids: ${allIds.join(", ")}`,
+      );
+    }
+
+    cases = matched;
+  }
+
   const results: EvalCaseResult[] = [];
 
   for (const testCase of cases) {
@@ -279,6 +367,45 @@ function evaluateCase(
   }
 
   return failures;
+}
+
+function shouldRunEvalCase(testCase: EvalCase, searchDocsMode: ReturnType<typeof loadConfig>["searchDocsMode"]): boolean {
+  if (!testCase.requiresSearchDocsMode || testCase.requiresSearchDocsMode.length === 0) {
+    return true;
+  }
+
+  return testCase.requiresSearchDocsMode.includes(searchDocsMode);
+}
+
+/** vector/hybrid 模式且 document_chunks 为空时自动建索引，避免 search-docs-city-zh 等 case 误 fail */
+async function ensureRagIndexIfNeeded(config: ReturnType<typeof loadConfig>, pool: Pool): Promise<void> {
+  if (config.searchDocsMode === "keyword") {
+    return;
+  }
+
+  const store = new PostgresDocumentChunkStore(pool);
+  const existingCount = await store.count();
+
+  if (existingCount > 0) {
+    return;
+  }
+
+  console.log("document_chunks is empty; building vector index before evals...");
+
+  const embeddingClient = new TokenHubEmbeddingClient({
+    apiKey: config.hunyuanApiKey,
+    model: config.hunyuanEmbeddingModel,
+    baseURL: config.hunyuanBaseUrl,
+  });
+
+  const result = await buildAndStoreDocumentIndex(pool, embeddingClient, {
+    rootDir: config.readFileRootDir,
+    allowedExtensions: config.readFileAllowedExtensions,
+    deniedBasenames: config.readFileDeniedBasenames,
+    chunkChars: config.searchDocsChunkChars,
+  });
+
+  console.log(`Vector index ready: ${result.chunkCount} chunks`);
 }
 
 main().catch((error: unknown) => {

@@ -329,3 +329,29 @@ pnpm run task:replay -- <taskId>
 | 删掉 `travel-notes.md` | `search-docs-japan-city` 无 Osaka |
 
 ---
+
+## E.7-B 向量 / hybrid 检索（补充）
+
+> **Embedding / 余弦相似度入参出参、分子分母野路子理解**见 [`embedding-cosine-notes.md`](./embedding-cosine-notes.md)。
+
+| 配置 | 说明 |
+|------|------|
+| `SEARCH_DOCS_MODE` | `keyword`（默认）\| `vector` \| `hybrid` |
+| `HUNYUAN_EMBEDDING_MODEL` | TokenHub 向量模型，默认 `kinfra-text-embedding-0.6b` |
+| `pnpm run rag:index` | 离线 embed 写 `document_chunks`；fixture 变更后须重跑 |
+
+**hybrid 手测（中文同义）：**
+
+```bash
+pnpm run rag:index
+SEARCH_DOCS_MODE=hybrid pnpm run dev:server
+curl -s -X POST http://localhost:3000/agent/run \
+  -H 'content-type: application/json' \
+  -d '{"input":"请用 search_docs 搜索文档里提到的台北，直接回答城市英文名"}' \
+  | jq -r '.result.summary'
+# 预期：Taipei；tool output 含 Search mode: hybrid
+```
+
+`search-docs-city-zh` eval 仅在 `vector`/`hybrid` 模式运行（keyword 会 skip）。
+
+---
