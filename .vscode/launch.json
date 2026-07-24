@@ -17,6 +17,7 @@
       "runtimeArgs": ["--import", "tsx"],
       "console": "internalConsole",
       "outputCapture": "std",
+      // server.ts 已输出监听端口和健康检查地址；调试启动时不再额外打开浏览器。
       "internalConsoleOptions": "openOnSessionStart",
       "stopOnEntry": false,
       "preLaunchTask": "api-contract: build",
@@ -26,11 +27,6 @@
         "!**/node_modules/**"
       ],
       "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
-      "serverReadyAction": {
-        "action": "openExternally",
-        "pattern": "HTTP server started",
-        "uriFormat": "http://localhost:3000/health"
-      },
       "presentation": {
         "group": "api",
         "order": 1

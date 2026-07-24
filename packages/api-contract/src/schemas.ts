@@ -4,7 +4,8 @@
  */
 import { z } from "zod";
 
-export const TaskStatusSchema = z.enum(["pending", "running", "succeeded", "failed"]);
+/** cancelled：用户取消或任务超时中止（E.8），与 failed（工具/LLM 业务失败）区分 */
+export const TaskStatusSchema = z.enum(["pending", "running", "succeeded", "failed", "cancelled"]);
 
 export const ToolCallStatusSchema = z.enum(["succeeded", "failed", "skipped"]);
 
@@ -143,6 +144,15 @@ export const GetTaskResponseSchema = z.object({
   toolCalls: z.array(ToolCallRecordSchema),
   /** Planner 决策链（非 OpenTelemetry traceId）；命名见 docs/current-status.md 【H 节】 */
   plannerTrace: z.array(PlannerStepRecordSchema),
+});
+
+/** POST /tasks/:taskId/cancel（E.8）：请求取消运行中任务 */
+export const CancelTaskResponseSchema = z.object({
+  taskId: z.string(),
+  /** true = 已向运行中任务发出 abort；false = 当时没有可取消的运行态 */
+  cancelled: z.boolean(),
+  /** 发出请求时的任务状态（最终 cancelled 需再 GET /tasks/:id） */
+  status: TaskStatusSchema,
 });
 
 export const HealthResponseSchema = z.object({

@@ -8,6 +8,7 @@ import type {
   GetSessionMessagesResponseSchema,
   GetSessionResponseSchema,
   GetTaskResponseSchema,
+  CancelTaskResponseSchema,
   HealthResponseSchema,
   ListSessionsQuerySchema,
   ListSessionsResponseSchema,
@@ -40,6 +41,7 @@ export type GetSessionResponse = z.infer<typeof GetSessionResponseSchema>;
 export type GetSessionMessagesResponse = z.infer<typeof GetSessionMessagesResponseSchema>;
 export type ArchiveSessionResponse = z.infer<typeof ArchiveSessionResponseSchema>;
 export type GetTaskResponse = z.infer<typeof GetTaskResponseSchema>;
+export type CancelTaskResponse = z.infer<typeof CancelTaskResponseSchema>;
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
 export type AgentStreamEvent = z.infer<typeof AgentStreamEventSchema>;

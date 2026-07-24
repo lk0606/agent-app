@@ -15,6 +15,11 @@ export interface AgentContext {
   logger: Logger;
   /** 可选：POST /agent/stream 注入，用于推送 SSE 事件 */
   emitStream?: (event: AgentStreamEvent) => void;
+  /**
+   * E.8：任务取消/超时信号。Planner 在步进边界 throwIfAborted；
+   * 来源为 TaskRunner 内部 AbortController（cancel API / 客户端断开 / 超时共用）。
+   */
+  signal?: AbortSignal;
 }
 
 export interface AgentRequest {

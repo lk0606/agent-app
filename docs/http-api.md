@@ -212,6 +212,64 @@ GET /tasks/:taskId
 
 这个接口主要给前端调试面板和任务回放详情使用。
 
+`task.status` 取值：`pending` | `running` | `succeeded` | `failed` | **`cancelled`**（E.8：用户取消或超时中止，不是工具业务失败）。
+
+## Cancel Task（E.8）
+
+```http
+POST /tasks/:taskId/cancel
+```
+
+对 **running** 任务发出 `AbortSignal`；Planner 在步进边界退出，最终 `tasks.status=cancelled`、`errorCode=CANCELLED`。
+
+返回：
+
+```json
+{
+  "taskId": "...",
+  "cancelled": true,
+  "status": "running"
+}
+```
+
+| 字段 | 含义 |
+|------|------|
+| `cancelled` | `true` = 当时找到运行中 controller 并 abort；`false` = 任务已结束或不在本进程 |
+| `status` | 发请求时读到的状态；最终以再 `GET /tasks/:id` 为准 |
+
+说明：
+
+- 客户端断开 `POST /agent/stream` 也会 abort（等价取消）。
+- 整任务超时见 env `AGENT_TASK_TIMEOUT_MS`（未设则不启用）；错误码 `TIMEOUT_ERROR`，status 仍为 `cancelled`。
+- 当前 LLM 调用为协作式取消：正在进行的一次 `llm.plan` 可能跑完才在下一步边界停下。
+
+### curl 示例（推荐用 wait，不要用 time）
+
+**不用开前端。** `taskId` 在 SSE **第一帧** `thinking` 的 JSON 里（服务端开流后立刻推）。
+
+```bash
+# 终端 A：长等待；一出现 thinking 就抄 data 里的 taskId
+curl -N -X POST http://localhost:3000/agent/stream \
+  -H 'content-type: application/json' \
+  -d '{"input":"请务必调用 wait 工具等待 15 秒，结束后只回复完成"}'
+```
+
+你会先看到类似：
+
+```text
+event: thinking
+data: {"type":"thinking","taskId":"xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx","step":1}
+```
+
+把 `taskId` 复制到终端 B（不要写字面量 `<taskId>`）：
+
+```bash
+curl -s -X POST http://localhost:3000/tasks/粘贴真实UUID/cancel | jq .
+curl -s http://localhost:3000/tasks/粘贴真实UUID | jq '{status: .task.status, errorCode: .task.errorCode}'
+```
+
+更省事：终端 2 跑 `pnpm run smoke:cancel`（脚本自己从 SSE 读 taskId，不必手抄）。
+
 ## Stream Agent（SSE）
 
 ```http
@@ -237,7 +295,7 @@ data: {"type":"thinking","taskId":"...","step":1}
 | `tool_end` | 工具结束（`status`: succeeded / failed；`toolOutput` 为完整输出） |
 | `token` | 回答片段（混元 `stream: true` 真流式 delta；未 stream 时由服务端切片 fallback） |
 | `done` | 任务成功结束，含 `sessionId`、`taskId`、`result` |
-| `error` | 任务失败，含 `code`、`message` |
+| `error` | 任务失败或取消/超时，含 `code`（如 `CANCELLED` / `TIMEOUT_ERROR`）、`message` |
 
 命名见 `docs/current-status.md` 【H 节】：SSE 事件 **不是** OpenTelemetry `traceId`；落库决策链看 `plannerTrace`。
 

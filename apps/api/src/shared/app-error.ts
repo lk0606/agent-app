@@ -5,6 +5,8 @@ export type ErrorCode =
   | "CONFIG_ERROR"
   | "NETWORK_ERROR"
   | "TIMEOUT_ERROR"
+  /** 用户/客户端主动取消任务（E.8）；落库 tasks.status=cancelled */
+  | "CANCELLED"
   | "TOOL_ERROR"
   | "LLM_ERROR"
   | "BAD_REQUEST"
@@ -28,6 +30,11 @@ export function classifyError(error: unknown): AppError {
   }
 
   if (error instanceof Error) {
+    // fetch/OpenAI SDK 在 AbortSignal 触发时抛 AbortError
+    if (error.name === "AbortError") {
+      return new AppError("CANCELLED", error.message || "Task was cancelled.");
+    }
+
     const message = error.message.toLowerCase();
 
     if (message.includes("timeout")) {

@@ -39,6 +39,7 @@ export class HunyuanLlmClient implements LlmClient {
               // 工具名须与 create-agent-runtime 注册的 name 一致，否则模型看不到 function
               "If the user asks to list, browse, or enumerate files in the sandbox directory, call the list_dir tool with a relative path or empty input for the root.",
               "If the user asks to search, find, or look up information across sandbox documents without a specific file path, call the search_docs tool with the query.",
+              "If the user explicitly asks to wait, sleep, pause, or delay for N seconds, you MUST call the wait tool with that number of seconds. Do not claim wait is unavailable when it is listed in tools.",
               "If previous tool results are already sufficient, answer directly instead of calling the same tool repeatedly.",
             ].join(" "),
           },

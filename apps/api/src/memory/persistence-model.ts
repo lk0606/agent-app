@@ -2,7 +2,8 @@
  * 持久化领域模型（TS 类型，非 DB schema 文件）。
  * 表结构见 apps/api/infra/postgres/migrations/；API JSON 字段用 camelCase，DB 列用 snake_case。
  */
-export type TaskStatus = "pending" | "running" | "succeeded" | "failed";
+/** cancelled = 主动取消或超时中止（E.8），不是工具执行失败 */
+export type TaskStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
 
 export type ToolCallStatus = "succeeded" | "failed" | "skipped";
 

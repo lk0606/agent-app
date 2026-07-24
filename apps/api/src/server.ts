@@ -4,7 +4,7 @@
  * 请求大致分四类：
  * 1. Agent 执行：POST /agent/run（一次性 JSON）、POST /agent/stream（SSE 推送进度）
  * 2. Session 查询：GET /sessions、GET /sessions/:id、GET .../messages、PATCH .../archive
- * 3. Task 观测：GET /tasks/:id（messages + toolCalls + plannerTrace）
+ * 3. Task 观测与控制：GET /tasks/:id；POST /tasks/:id/cancel（E.8）
  * 4. 健康检查：GET /health
  *
  * 编排链：本文件 → prepareAgentRun → TaskRunner → PlannerAgent → LlmClient / Tools → MemoryStore(Postgres)
@@ -26,7 +26,7 @@ import { AppError, classifyError } from "./shared/app-error.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  const { runner, logger, memory, pool } = createAgentRuntime(config);
+  const { runner, logger, memory, pool, runningTasks } = createAgentRuntime(config);
 
   const server = createServer(async (req, res) => {
     try {
@@ -62,6 +62,22 @@ async function main(): Promise<void> {
 
         initSseResponse(res);
 
+        // E.8 手测：首帧立刻带上 taskId，不必等 LLM；取消时终端 B 可直接抄
+        writeSseEvent(res, "thinking", {
+          type: "thinking",
+          taskId,
+          step: 1,
+        });
+
+        // E.8：客户端断开 SSE 时 abort，避免关页后后端继续空跑
+        const disconnectController = new AbortController();
+        const onRequestClose = () => {
+          if (!res.writableFinished && !disconnectController.signal.aborted) {
+            disconnectController.abort(new AppError("CANCELLED", "SSE client disconnected."));
+          }
+        };
+        req.on("close", onRequestClose);
+
         const emitStream = (event: AgentStreamEvent) => {
           writeSseEvent(res, event.type, event);
         };
@@ -69,7 +85,7 @@ async function main(): Promise<void> {
         try {
           const result = await runner.run(
             { taskId, sessionId, input: agentRequest.input },
-            { emitStream },
+            { emitStream, signal: disconnectController.signal },
           );
 
           writeSseEvent(res, "done", {
@@ -94,6 +110,7 @@ async function main(): Promise<void> {
             message: appError.message,
           });
         } finally {
+          req.off("close", onRequestClose);
           endSseResponse(res);
         }
 
@@ -171,6 +188,42 @@ async function main(): Promise<void> {
         }
 
         writeJson(res, HTTP_STATUS.ok, { task, messages, toolCalls, plannerTrace });
+        return;
+      }
+
+      // --- E.8：取消运行中任务（abort → Planner 协作退出 → status=cancelled）---
+      if (
+        req.method === "POST" &&
+        pathSegments[0] === "tasks" &&
+        pathSegments[2] === "cancel" &&
+        pathSegments.length === 3
+      ) {
+        const taskId = pathSegments[1]!;
+        const task = await memory.getTask(taskId);
+
+        if (!task) {
+          throw new AppError("NOT_FOUND", `Task "${taskId}" was not found.`);
+        }
+
+        if (task.status !== "running") {
+          writeJson(res, HTTP_STATUS.ok, {
+            taskId,
+            cancelled: false,
+            status: task.status,
+          });
+          return;
+        }
+
+        const aborted = runningTasks.abort(
+          taskId,
+          new AppError("CANCELLED", `Task "${taskId}" was cancelled by client.`),
+        );
+
+        writeJson(res, HTTP_STATUS.ok, {
+          taskId,
+          cancelled: aborted,
+          status: task.status,
+        });
         return;
       }
 

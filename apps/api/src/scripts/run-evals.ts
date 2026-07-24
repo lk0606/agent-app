@@ -26,6 +26,7 @@ import { verifyPgConnection } from "../db/pg-client.js";
 import { TokenHubEmbeddingClient } from "../llm/embedding-client.js";
 import { buildAndStoreDocumentIndex } from "../rag/build-document-index.js";
 import { PostgresDocumentChunkStore } from "../rag/document-chunk-store.js";
+import { isTaskCancellation } from "../runtime/abort-utils.js";
 import { classifyError } from "../shared/app-error.js";
 import type { AgentResponse } from "../agents/base-agent.js";
 
@@ -41,9 +42,11 @@ interface EvalCase {
   /** 最终回答里不得出现这些词（小写比较），用于防幻觉泄露等 */
   forbiddenKeywords?: string[];
   expectedErrorCode?: string;
-  expectedTaskStatus?: "succeeded" | "failed";
+  expectedTaskStatus?: "succeeded" | "failed" | "cancelled";
   /** 仅统计 status=succeeded 的工具次数；失败尝试（如安全拦截）不计入 */
   maxToolCalls?: number;
+  /** E.8：覆盖默认超时；极短值可测 TIMEOUT → cancelled（不必等 LLM 跑完） */
+  taskTimeoutMs?: number;
   /** 仅当 SEARCH_DOCS_MODE 为所列值之一时才跑该 case（如向量同义检索） */
   requiresSearchDocsMode?: Array<"keyword" | "vector" | "hybrid">;
 }
@@ -62,7 +65,7 @@ interface EvalCaseResult {
   failures: string[];
   durationMs: number;
   summary: string | null;
-  taskStatus: "succeeded" | "failed";
+  taskStatus: "succeeded" | "failed" | "cancelled";
   errorCode: string | null;
   toolCalls: EvalToolCallSnapshot[];
 }
@@ -173,8 +176,10 @@ async function main(): Promise<void> {
       toolCalls = result.toolCalls;
       assertTaskId = result.assertTaskId;
     } catch (error: unknown) {
-      taskStatus = "failed";
-      errorCode = classifyError(error).code;
+      const appError = classifyError(error);
+      errorCode = appError.code;
+      // E.8：超时/取消落 cancelled，与工具业务 failed 区分
+      taskStatus = isTaskCancellation(appError) ? "cancelled" : "failed";
 
       // 工具失败时 Planner 会 throw，内存 toolCalls 为空；从 DB 还原含 failed 的尝试记录。
       if (toolCalls.length === 0) {
@@ -272,11 +277,14 @@ async function runEvalCase(
 
     for (const [index, stepInput] of testCase.steps.entries()) {
       assertTaskId = `${taskId}-step-${index + 1}`;
-      lastResult = await runner.run({
-        taskId: assertTaskId,
-        sessionId,
-        input: stepInput,
-      });
+      lastResult = await runner.run(
+        {
+          taskId: assertTaskId,
+          sessionId,
+          input: stepInput,
+        },
+        { timeoutMs: testCase.taskTimeoutMs },
+      );
     }
 
     if (!lastResult) {
@@ -290,10 +298,13 @@ async function runEvalCase(
     };
   }
 
-  const result = await runner.run({
-    taskId,
-    input: testCase.input!,
-  });
+  const result = await runner.run(
+    {
+      taskId,
+      input: testCase.input!,
+    },
+    { timeoutMs: testCase.taskTimeoutMs },
+  );
 
   return {
     summary: result.summary,
@@ -320,7 +331,7 @@ function evaluateCase(
   testCase: EvalCase,
   summary: string | null,
   toolCalls: EvalToolCallSnapshot[],
-  taskStatus: "succeeded" | "failed",
+  taskStatus: "succeeded" | "failed" | "cancelled",
   errorCode: string | null,
 ): string[] {
   const failures: string[] = [];

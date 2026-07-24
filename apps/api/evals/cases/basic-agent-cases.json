@@ -186,5 +186,13 @@
     "expectedKeywords": ["Taipei"],
     "maxToolCalls": 1,
     "requiresSearchDocsMode": ["vector", "hybrid"]
+  },
+  {
+    "id": "task-timeout-smoke",
+    "input": "请调用 time 工具告诉我当前时间，一句话回答。",
+    "taskTimeoutMs": 1,
+    "expectedTaskStatus": "cancelled",
+    "expectedErrorCode": "TIMEOUT_ERROR",
+    "maxToolCalls": 0
   }
 ]

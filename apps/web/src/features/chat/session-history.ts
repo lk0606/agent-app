@@ -31,7 +31,7 @@ export function sessionMessagesToChatItems(
     const answer = assistantMessage?.content ?? task.summary ?? "";
 
     // 失败任务可能没有 assistant 消息，仍要展示 error 气泡
-    if (answer || task.status === "failed") {
+    if (answer || task.status === "failed" || task.status === "cancelled") {
       items.push(createHistoricalAssistantRun({
         task,
         userMessageId,
@@ -56,7 +56,7 @@ function createHistoricalAssistantRun(input: {
     role: "assistant-run",
     replyToMessageId: userMessageId,
     taskId: task.id,
-    status: task.status === "failed" ? "failed" : "done",
+    status: task.status === "failed" || task.status === "cancelled" ? "failed" : "done",
     steps: answer
       ? [
           {

@@ -10,6 +10,7 @@ import { HunyuanLlmClient } from "../llm/hunyuan-llm-client.js";
 import { TokenHubEmbeddingClient } from "../llm/embedding-client.js";
 import { PostgresMemoryStore } from "../memory/postgres-memory-store.js";
 import { PostgresDocumentChunkStore } from "../rag/document-chunk-store.js";
+import { RunningTaskRegistry } from "../runtime/running-task-registry.js";
 import { TaskRunner } from "../runtime/task-runner.js";
 import { createLogger } from "../shared/logger.js";
 import { EchoTool } from "../tools/echo-tool.js";
@@ -18,6 +19,7 @@ import { ListDirTool } from "../tools/list-dir-tool.js";
 import { ReadFileTool } from "../tools/read-file-tool.js";
 import { SearchDocsTool } from "../tools/search-docs-tool.js";
 import { TimeTool } from "../tools/time-tool.js";
+import { WaitTool } from "../tools/wait-tool.js";
 
 export function createAgentRuntime(config: AppConfig) {
   const logger = createLogger(config.appName);
@@ -75,6 +77,10 @@ export function createAgentRuntime(config: AppConfig) {
       embeddingClient,
       chunkStore,
     }),
+    // E.8 手测取消：长等待可中断；日常任务勿滥用
+    new WaitTool({
+      maxSeconds: config.waitToolMaxSeconds,
+    }),
   ];
   const agent = new PlannerAgent({
     maxSteps: config.agentMaxSteps,
@@ -82,12 +88,23 @@ export function createAgentRuntime(config: AppConfig) {
     sessionHistoryMessageLimit: config.sessionHistoryMessageLimit,
     sessionHistoryCharBudget: config.sessionHistoryCharBudget,
   });
-  const runner = new TaskRunner({ agent, tools, memory, llm, logger });
+  // E.8：进程内登记运行中任务的 AbortController，供 POST /tasks/:id/cancel
+  const runningTasks = new RunningTaskRegistry();
+  const runner = new TaskRunner({
+    agent,
+    tools,
+    memory,
+    llm,
+    logger,
+    runningTasks,
+    defaultTimeoutMs: config.agentTaskTimeoutMs,
+  });
 
   return {
     logger,
     memory,
     runner,
+    runningTasks,
     pool,
   };
 }

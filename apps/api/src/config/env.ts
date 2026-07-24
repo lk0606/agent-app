@@ -37,6 +37,13 @@ export interface AppConfig {
   searchDocsMode: "keyword" | "vector" | "hybrid";
   /** E.7-B embedding 模型；与 chat 共用 TokenHub baseURL */
   hunyuanEmbeddingModel: string;
+  /** E.8：wait 工具最长等待秒数（手测取消用） */
+  waitToolMaxSeconds: number;
+  /**
+   * E.8：单次任务默认超时（ms）。null = 不启用；
+   * POST cancel / SSE 断开仍可取消。eval 可用单 case 的 taskTimeoutMs 覆盖。
+   */
+  agentTaskTimeoutMs: number | null;
   port: number;
 }
 
@@ -87,6 +94,9 @@ export function loadConfig(): AppConfig {
     searchDocsChunkChars: readNumber("SEARCH_DOCS_CHUNK_CHARS", 500),
     searchDocsMode: readSearchDocsMode(process.env.SEARCH_DOCS_MODE),
     hunyuanEmbeddingModel: process.env.HUNYUAN_EMBEDDING_MODEL ?? "kinfra-text-embedding-0.6b",
+    waitToolMaxSeconds: readNumber("WAIT_TOOL_MAX_SECONDS", 30),
+    // 未设置或 0 = 不启用整任务超时（取消 API / 客户端断开仍有效）
+    agentTaskTimeoutMs: readOptionalPositiveNumber("AGENT_TASK_TIMEOUT_MS"),
     port: readNumber("PORT", 3000),
   };
 }
@@ -102,6 +112,23 @@ function readNumber(name: string, fallback: number): number {
 
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return fallback;
+  }
+
+  return parsed;
+}
+
+/** 未设置 / 空 / 0 / 非法 → null（表示关闭该可选能力） */
+function readOptionalPositiveNumber(name: string): number | null {
+  const value = process.env[name];
+
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
   }
 
   return parsed;

@@ -1,4 +1,5 @@
 import type { RecordPlannerStepInput } from "../memory/memory-store.js";
+import { throwIfAborted, isTaskCancellation } from "../runtime/abort-utils.js";
 import {
   createTokenHandler,
   emitPlannerDecision,
@@ -42,6 +43,9 @@ export class PlannerAgent implements Agent {
     const streamedFlag = { value: false }; // answerWithTool 是否已推过 token（SSE 用）
 
     for (let step = 0; step < this.options.maxSteps; step += 1) {
+      // E.8：每步开始前检查取消/超时，避免 abort 后继续打 LLM
+      throwIfAborted(context.signal);
+
       const stepNumber = step + 1;
       const stepStartedAt = Date.now();
       const stepCreatedAt = new Date(stepStartedAt).toISOString();
@@ -61,6 +65,8 @@ export class PlannerAgent implements Agent {
           toolOutput: call.output,
         })),
       });
+
+      throwIfAborted(context.signal);
 
       emitPlannerDecision(context.emitStream, request.taskId, stepNumber, decision);
 
@@ -176,13 +182,19 @@ export class PlannerAgent implements Agent {
         toolInput,
       });
 
+      throwIfAborted(context.signal);
+
       const startedAt = new Date().toISOString();
 
       try {
         // F. 执行工具 → outcome: tool_executed（成功路径）
         const toolOutput = await tool.execute({
           input: toolInput,
+          // E.8：把任务 AbortSignal 传给工具，wait 等可中断工具才能中途停下
+          signal: context.signal,
         });
+
+        throwIfAborted(context.signal);
 
         context.logger.info("Tool execution finished", {
           step: stepNumber,
@@ -242,6 +254,11 @@ export class PlannerAgent implements Agent {
         );
         break;
       } catch (error: unknown) {
+        // 取消/超时不是工具失败：原样抛出，由 TaskRunner 落 cancelled
+        if (error instanceof AppError && isTaskCancellation(error)) {
+          throw error;
+        }
+
         // G. 工具失败 → outcome: tool_failed，向上抛出让 TaskRunner 标 failed
         const errorCode = error instanceof AppError ? error.code : "TOOL_ERROR";
         const errorMessage = error instanceof Error ? error.message : String(error);
