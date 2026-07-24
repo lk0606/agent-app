@@ -3,6 +3,8 @@
  * - plan：决定是否 function calling
  * - answerWithTool：拿工具结果组织自然语言（可 stream）
  * - summarizeSession：把旧会话压成 summary 写回 sessions 表
+ *
+ * E.8.5：各 Request 可带 signal，混元 HTTP 中途可被 cancel/超时 abort。
  */
 export interface ToolDefinition {
   name: string;
@@ -29,6 +31,8 @@ export interface PlanRequest {
     toolInput: string;
     toolOutput: string;
   }>;
+  /** E.8.5：取消/超时时中止本次 plan 的 HTTP 请求 */
+  signal?: AbortSignal;
 }
 
 export interface AnswerRequest {
@@ -41,6 +45,8 @@ export interface AnswerRequest {
   toolName: string;
   toolInput: string;
   toolOutput: string;
+  /** E.8.5：取消/超时时中止 answer 生成（含 stream） */
+  signal?: AbortSignal;
 }
 
 export interface SessionSummaryRequest {
@@ -50,6 +56,8 @@ export interface SessionSummaryRequest {
     content: string;
   }>;
   currentUserInput: string;
+  /** E.8.5：取消时中止摘要 LLM 调用 */
+  signal?: AbortSignal;
 }
 
 export interface LlmStreamOptions {

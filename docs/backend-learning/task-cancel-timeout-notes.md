@@ -22,6 +22,7 @@ TaskRunner.run()
   → 可选外部 signal（SSE close）并入
   → PlannerAgent.plan(..., { signal })
        每步边界 throwIfAborted(signal)
+       llm.plan / answerWithTool(..., { signal })  // E.8.5 可中途掐 HTTP
   → 成功 / failed / cancelled 落库
   → finally unregister
 ```
@@ -37,12 +38,13 @@ TaskRunner.run()
 | errorCode | `CANCELLED` 或 `TIMEOUT_ERROR` | `TOOL_ERROR` / `BAD_REQUEST` / … |
 | 产品含义 | 「没跑完，被中止」 | 「跑完了，但业务失败」 |
 
-## 协作式取消（本仓库选择）
+## 协作式取消 → E.8.5 请求级中断
 
-当前只在 **步进边界** 检查 abort（plan 前后、tool 前后）。  
-正在飞的那一次混元 HTTP 请求**不会**立刻掐断——等它返回后再 `throwIfAborted`。
+E.8 初版只在 **步进边界** 检查 abort（plan 前后、tool 前后）。  
+正在飞的那一次混元 HTTP 要等返回后才停。
 
-对学习足够；若要「请求级抢占」，需把 `signal` 传进 OpenAI SDK 的 `chat.completions.create({ signal })`。
+**E.8.5：** `plan` / `answerWithTool` / `summarizeSession` 把 `signal` 传给 OpenAI SDK 第二参数 `{ signal }`；  
+cancel/超时可中途掐断当前 LLM 请求。Abort 经 `rethrowIfLlmAborted` 转成 `CANCELLED`，避免被包成 `LLM_ERROR` 误标 `failed`。
 
 ## 自检
 
@@ -50,9 +52,11 @@ TaskRunner.run()
 - [ ] 知道为什么 Registry 是进程内 Map
 - [ ] 跑过 `pnpm run evals:run -- --id task-timeout-smoke`
 - [ ] 跑过 `pnpm run smoke:cancel`（或对 wait 15s 手动 cancel），确认不是对 `time` 抢取消
+- [ ] 知道 E.8.5 后 cancel 不必等当前混元 HTTP 跑完
 
 ## 手测为什么不能用 time
 
 `time` / 普通问答在 2–5 秒内结束，你从 SSE 抄 `taskId` 再 POST cancel 时任务往往已是 `succeeded`，`cancelled:false`。
 
-正确窗口：让 Planner 调 **`wait`（默认演示 15 秒）**，工具按 100ms 切片检查 `AbortSignal`，cancel 会在等待中途生效。
+正确窗口：让 Planner 调 **`wait`（默认演示 15 秒）**，工具按 100ms 切片检查 `AbortSignal`，cancel 会在等待中途生效。  
+也可在 **plan 阶段**（thinking 之后、tool_start 之前）cancel，验证 E.8.5 能打断 LLM HTTP。

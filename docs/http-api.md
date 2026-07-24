@@ -239,9 +239,9 @@ POST /tasks/:taskId/cancel
 
 说明：
 
+- 当前 LLM 调用已传 `signal`（E.8.5）：cancel/超时可中途掐断混元 HTTP；Abort 映射为 `CANCELLED`。
 - 客户端断开 `POST /agent/stream` 也会 abort（等价取消）。
 - 整任务超时见 env `AGENT_TASK_TIMEOUT_MS`（未设则不启用）；错误码 `TIMEOUT_ERROR`，status 仍为 `cancelled`。
-- 当前 LLM 调用为协作式取消：正在进行的一次 `llm.plan` 可能跑完才在下一步边界停下。
 
 ### curl 示例（推荐用 wait，不要用 time）
 

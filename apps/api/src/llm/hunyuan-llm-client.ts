@@ -1,10 +1,13 @@
 /**
  * 混元（TokenHub OpenAI 兼容接口）的 LlmClient 实现。
  * model / baseURL 来自 env；旧 api.hunyuan.cloud.tencent.com 的 Key 不能用于 TokenHub。
+ *
+ * E.8.5：create(body, { signal }) —— signal 在第二参数 RequestOptions，不在 body。
  */
 import OpenAI from "openai";
 
 import { AppError } from "../shared/app-error.js";
+import { rethrowIfLlmAborted, throwIfAborted } from "../runtime/abort-utils.js";
 import type { AnswerRequest, LlmClient, LlmStreamOptions, PlanRequest, PlannerDecision, SessionSummaryRequest } from "./llm-client.js";
 
 export class HunyuanLlmClient implements LlmClient {
@@ -69,7 +72,7 @@ export class HunyuanLlmClient implements LlmClient {
           },
         })),
         tool_choice: "auto",
-      });
+      }, { signal: input.signal });
 
       // 3. 解析模型回复：有 tool_calls → 要工具；否则 → 直接回答
       const message = completion.choices[0]?.message;
@@ -95,6 +98,7 @@ export class HunyuanLlmClient implements LlmClient {
         draftAnswer: this.readMessageContent(message?.content),
       };
     } catch (error: unknown) {
+      rethrowIfLlmAborted(error);
       throw new AppError("LLM_ERROR", "Hunyuan planning request failed.", { cause: stringifyError(error) });
     }
   }
@@ -124,15 +128,21 @@ export class HunyuanLlmClient implements LlmClient {
       ];
 
       if (options?.onToken) {
-        const stream = await this.client.chat.completions.create({
-          model: this.options.model,
-          messages,
-          stream: true,
-        });
+        const stream = await this.client.chat.completions.create(
+          {
+            model: this.options.model,
+            messages,
+            stream: true,
+          },
+          { signal: input.signal },
+        );
 
         let answer = "";
 
         for await (const chunk of stream) {
+          // stream 迭代中途协作退出；SDK 在 signal abort 时也会抛，catch 里 rethrowIfLlmAborted
+          throwIfAborted(input.signal);
+
           const delta = chunk.choices[0]?.delta?.content;
 
           if (typeof delta === "string" && delta.length > 0) {
@@ -144,14 +154,18 @@ export class HunyuanLlmClient implements LlmClient {
         return answer.length > 0 ? answer : "The model returned an empty response.";
       }
 
-      const completion = await this.client.chat.completions.create({
-        model: this.options.model,
-        messages,
-      });
+      const completion = await this.client.chat.completions.create(
+        {
+          model: this.options.model,
+          messages,
+        },
+        { signal: input.signal },
+      );
 
       const message = completion.choices[0]?.message;
       return this.readMessageContent(message?.content);
     } catch (error: unknown) {
+      rethrowIfLlmAborted(error);
       throw new AppError("LLM_ERROR", "Hunyuan answer generation failed.", { cause: stringifyError(error) });
     }
   }
@@ -159,35 +173,39 @@ export class HunyuanLlmClient implements LlmClient {
   // 将旧会话压缩成稳定摘要，后续请求可复用，降低长会话的 token 和延迟成本。
   async summarizeSession(input: SessionSummaryRequest): Promise<string> {
     try {
-      const completion = await this.client.chat.completions.create({
-        model: this.options.model,
-        messages: [
-          {
-            role: "system",
-            content: [
-              "You summarize earlier conversation history for a Node agent.",
-              "If an existing summary is provided, merge the new messages into it.",
-              "Keep only stable user facts, prior decisions, and important tool findings.",
-              "Be concise. Prefer 3 to 6 short bullet-like lines in plain text.",
-              "Omit chit-chat and low-value repetition.",
-            ].join(" "),
-          },
-          {
-            role: "user",
-            // existingSummary 是已压缩的旧历史，后面的 messages 只放新增旧消息，控制摘要调用成本。
-            content: [
-              `Current user input: ${input.currentUserInput}`,
-              `Existing session summary:\n${input.existingSummary?.trim() || "No existing summary."}`,
-              "Earlier session history to summarize:",
-              input.messages.map((item, index) => `[${index + 1}] ${item.role}: ${item.content}`).join("\n"),
-            ].join("\n\n"),
-          },
-        ],
-      });
+      const completion = await this.client.chat.completions.create(
+        {
+          model: this.options.model,
+          messages: [
+            {
+              role: "system",
+              content: [
+                "You summarize earlier conversation history for a Node agent.",
+                "If an existing summary is provided, merge the new messages into it.",
+                "Keep only stable user facts, prior decisions, and important tool findings.",
+                "Be concise. Prefer 3 to 6 short bullet-like lines in plain text.",
+                "Omit chit-chat and low-value repetition.",
+              ].join(" "),
+            },
+            {
+              role: "user",
+              // existingSummary 是已压缩的旧历史，后面的 messages 只放新增旧消息，控制摘要调用成本。
+              content: [
+                `Current user input: ${input.currentUserInput}`,
+                `Existing session summary:\n${input.existingSummary?.trim() || "No existing summary."}`,
+                "Earlier session history to summarize:",
+                input.messages.map((item, index) => `[${index + 1}] ${item.role}: ${item.content}`).join("\n"),
+              ].join("\n\n"),
+            },
+          ],
+        },
+        { signal: input.signal },
+      );
 
       const message = completion.choices[0]?.message;
       return this.readMessageContent(message?.content);
     } catch (error: unknown) {
+      rethrowIfLlmAborted(error);
       throw new AppError("LLM_ERROR", "Hunyuan session summarization failed.", { cause: stringifyError(error) });
     }
   }

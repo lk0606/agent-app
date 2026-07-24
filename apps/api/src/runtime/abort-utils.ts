@@ -38,3 +38,27 @@ export function isTaskCancellation(error: unknown): boolean {
 
   return error.code === "CANCELLED" || error.code === "TIMEOUT_ERROR";
 }
+
+/**
+ * OpenAI / fetch 在 signal abort 时可能抛 AbortError 或 APIUserAbortError。
+ * 统一转成 CANCELLED，避免被上层包成 LLM_ERROR 误标 failed。
+ */
+export function rethrowIfLlmAborted(error: unknown): void {
+  if (error instanceof AppError && isTaskCancellation(error)) {
+    throw error;
+  }
+
+  if (error instanceof Error) {
+    const name = error.name;
+    const message = error.message.toLowerCase();
+
+    if (
+      name === "AbortError" ||
+      name === "APIUserAbortError" ||
+      message.includes("request was aborted") ||
+      message.includes("operation was aborted")
+    ) {
+      throw new AppError("CANCELLED", error.message || "LLM request was aborted.");
+    }
+  }
+}

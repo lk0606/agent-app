@@ -2,7 +2,7 @@
 
 这是项目的**唯一进度状态源**。做完一项就更新一项，其他文档只保留设计细节，不再各自维护「已完成 / 下一步」。
 
-最后更新：2026-07-23（E.8 任务取消 + 超时）
+最后更新：2026-07-24（E.8.5 LLM 请求级 AbortSignal）
 
 ## 30 秒阅读指南
 
@@ -974,7 +974,17 @@ curl -s http://localhost:3000/tasks/真实UUID | jq '{status: .task.status, erro
 - **不要用 `time` 抢取消**：工具瞬间结束，来不及 POST cancel。应用 `wait` 或 `pnpm run smoke:cancel`。
 - **不必开前端**：taskId 在 SSE 首帧；前端调试面板只是另一处能看见同一个 id。
 - **失败排查：** cancel 返回 `cancelled:false` → 任务已结束；模型没调 wait → 看 SSE 是否出现 `tool_start` / 重启 server 加载 WaitTool
-- **局限：** 非 wait 的 LLM HTTP 调用仍是协作式取消（当前请求返回后才停）
+- **局限：** 工具层（如 wait）与 LLM 层（E.8.5）均可中断；未传 signal 的调用仍可能跑完当前请求
+
+#### E.8.5 LLM 请求级中断（收尾）
+
+| 项 | 说明 |
+|----|------|
+| **传 signal** | `PlanRequest` / `AnswerRequest` / `SessionSummaryRequest` 带 `signal` |
+| **混元 SDK** | `create(body, { signal })`（第二参数 RequestOptions）；stream 循环内 `throwIfAborted` |
+| **错误映射** | `rethrowIfLlmAborted`：Abort → `CANCELLED`，避免误标 `LLM_ERROR`/`failed` |
+
+读码：`llm-client.ts` → `hunyuan-llm-client.ts`（搜 `signal`）→ `planner-agent.ts` 注入 `context.signal` → `abort-utils.ts` 的 `rethrowIfLlmAborted`。
 
 #### 学习要点
 

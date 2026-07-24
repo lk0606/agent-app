@@ -64,6 +64,7 @@ export class PlannerAgent implements Agent {
           toolInput: call.input,
           toolOutput: call.output,
         })),
+        signal: context.signal,
       });
 
       throwIfAborted(context.signal);
@@ -361,6 +362,7 @@ export class PlannerAgent implements Agent {
         toolName: toolCall.toolName,
         toolInput: toolCall.input,
         toolOutput: toolCall.output,
+        signal: context.signal,
       },
       {
         onToken: createTokenHandler(context.emitStream, request.taskId, streamedFlag),
@@ -412,6 +414,7 @@ export class PlannerAgent implements Agent {
       existingSummary: summaryNeedsOnlyNewMessages ? currentSummary : null,
       messages: this.applyCharBudget(messagesToSummarize, this.options.sessionHistoryCharBudget * 2),
       currentUserInput: request.input,
+      signal: context.signal,
     });
 
     await context.memory.updateSession(sessionId, {
