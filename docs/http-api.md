@@ -195,16 +195,33 @@ GET /tasks/:taskId
       "errorMessage": null,
       "durationMs": 842
     }
-  ]
+  ],
+  "metrics": {
+    "taskId": "...",
+    "durationMs": 2100,
+    "llmCallCount": 2,
+    "promptTokens": 800,
+    "completionTokens": 120,
+    "totalTokens": 920,
+    "toolCallCount": 1,
+    "plannerStepCount": 2,
+    "estimatedCostUsd": 0.00058,
+    "llmCalls": [
+      { "purpose": "plan", "model": "hy3-preview", "promptTokens": 500, "completionTokens": 40, "totalTokens": 540, "durationMs": 900 }
+    ]
+  }
 }
 ```
 
 `plannerTrace` 为 **Planner 决策链**（每轮 `llm.plan` 的结果），**不是** OpenTelemetry / 分布式链路里的 `traceId`。命名规则见 `docs/current-status.md` 【H 节】。
 
+`metrics` 为 **任务级观测**（表 `task_metrics`）：总耗时、LLM token、估算成本；与 `plannerTrace` / 未来 `traceId` 分开。旧任务可能为 `null`。
+
 | 字段 | 含义 |
 |------|------|
 | `plannerTrace` | 模型每一步要不要工具、选哪个、耗时、outcome（来自 `planner_steps` 表） |
 | `toolCalls` | 工具实际执行记录（来自 `tool_calls` 表） |
+| `metrics` | 任务耗时 / token / 估算成本（来自 `task_metrics` 表） |
 
 `plannerTrace` 主要字段：`step`、`needsTool`、`toolName`、耗时（`durationMs`）、错误（`errorCode` / `errorMessage`）、结果类型（`outcome`）。
 

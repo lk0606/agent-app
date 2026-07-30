@@ -44,6 +44,12 @@ export interface AppConfig {
    * POST cancel / SSE 断开仍可取消。eval 可用单 case 的 taskTimeoutMs 覆盖。
    */
   agentTaskTimeoutMs: number | null;
+  /**
+   * E.9：估算成本单价（USD / 百万 token）。仅学习对照，非 TokenHub 真实账单。
+   * 未配置时用占位默认值，保证 metrics.estimatedCostUsd 始终可算。
+   */
+  llmPricePromptPer1MUsd: number;
+  llmPriceCompletionPer1MUsd: number;
   port: number;
 }
 
@@ -97,6 +103,9 @@ export function loadConfig(): AppConfig {
     waitToolMaxSeconds: readNumber("WAIT_TOOL_MAX_SECONDS", 30),
     // 未设置或 0 = 不启用整任务超时（取消 API / 客户端断开仍有效）
     agentTaskTimeoutMs: readOptionalPositiveNumber("AGENT_TASK_TIMEOUT_MS"),
+    // E.9：占位单价；改 env 即可对照「贵在 prompt 还是 completion」
+    llmPricePromptPer1MUsd: readNonNegativeNumber("LLM_PRICE_PROMPT_PER_1M_USD", 0.5),
+    llmPriceCompletionPer1MUsd: readNonNegativeNumber("LLM_PRICE_COMPLETION_PER_1M_USD", 1.5),
     port: readNumber("PORT", 3000),
   };
 }
@@ -111,6 +120,23 @@ function readNumber(name: string, fallback: number): number {
   const parsed = Number(value);
 
   if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
+/** 允许 0（免费模型学习场景）；负数 / NaN 回退默认 */
+function readNonNegativeNumber(name: string, fallback: number): number {
+  const value = process.env[name];
+
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed) || parsed < 0) {
     return fallback;
   }
 

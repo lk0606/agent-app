@@ -1,4 +1,5 @@
 /** 内存版 MemoryStore：无 Postgres 时的测试替身，接口与 PostgresMemoryStore 一致 */
+import type { TaskMetricsRecord } from "../runtime/task-metrics.js";
 import type { PlannerStepRecord, SessionRecord, TaskRecord, ToolCallRecord } from "./persistence-model.js";
 import type {
   MemoryMessage,
@@ -13,6 +14,7 @@ export class InMemoryStore implements MemoryStore {
   private readonly store = new Map<string, MemoryMessage[]>();
   private readonly toolCalls = new Map<string, ToolCallRecord[]>();
   private readonly plannerSteps = new Map<string, PlannerStepRecord[]>();
+  private readonly taskMetrics = new Map<string, TaskMetricsRecord>();
 
   async createSession(input: {
     id: string;
@@ -229,5 +231,22 @@ export class InMemoryStore implements MemoryStore {
 
   async listTaskPlannerSteps(taskId: string): Promise<PlannerStepRecord[]> {
     return [...(this.plannerSteps.get(taskId) ?? [])].sort((left, right) => left.step - right.step);
+  }
+
+  async saveTaskMetrics(input: TaskMetricsRecord): Promise<void> {
+    this.taskMetrics.set(input.taskId, {
+      ...input,
+      llmCalls: input.llmCalls.map((call) => ({ ...call })),
+    });
+  }
+
+  async getTaskMetrics(taskId: string): Promise<TaskMetricsRecord | null> {
+    const current = this.taskMetrics.get(taskId);
+    return current
+      ? {
+          ...current,
+          llmCalls: current.llmCalls.map((call) => ({ ...call })),
+        }
+      : null;
   }
 }

@@ -2,7 +2,7 @@
 
 这是项目的**唯一进度状态源**。做完一项就更新一项，其他文档只保留设计细节，不再各自维护「已完成 / 下一步」。
 
-最后更新：2026-07-24（E.8.5 LLM 请求级 AbortSignal）
+最后更新：2026-07-29（E.9 文档补齐：metrics / plannerTrace / traceId）
 
 ## 30 秒阅读指南
 
@@ -29,6 +29,7 @@
 | 想搞懂 Agent **完整原理**（推荐主读） | **[`docs/backend-learning/agent-core-flow.md`](backend-learning/agent-core-flow.md)** |
 | 想搞懂 `runner.run` / `plan()` 速查 | [`docs/backend-learning/agent-run-chain.md`](backend-learning/agent-run-chain.md) |
 | 想搞懂 Tool 选型 / execute / 落库 | [`docs/backend-learning/tool-execution-chain.md`](backend-learning/tool-execution-chain.md) |
+| 想搞懂任务用量 / 估费 / 三种追踪差别 | [`docs/backend-learning/task-metrics-notes.md`](backend-learning/task-metrics-notes.md) |
 | Agent 运行态 / Cursor 式 SSE 计划 | 本文件 [E.3.5](#e35-agent-运行态完整体验cursor-式) |
 | API / 表 / 字段怎么命名 | 本文件 [【H 节】命名约定](#h-命名约定) |
 | 所有文档分工 | 本文件 [【G 节】文档索引](#g-文档索引) |
@@ -112,7 +113,7 @@ AI / 协作者交付任务时：**聊天里说明 + 源码注释 + 合并前写�
 
 **路线：** 后端优先学习（见【E 节】与 `.cursor/rules/backend-first-learning.mdc`）。前端工作台仅辅助观察后端；日常用 `curl` + `evals:run` + `task:replay` 验证即可。
 
-**当前开发重点：** **E.8 任务取消 + 超时** 已交付。可选：加固安全 eval、pgvector、或按 [`docs/learning-plan.md`](learning-plan.md) 继续观测 / Multi-Agent。
+**当前开发重点：** **E.9 任务观测与成本统计** 已交付（`task_metrics` + `GET /tasks` 的 `metrics`）。可选：加固安全 eval、pgvector、或按 [`docs/learning-plan.md`](learning-plan.md) 继续 Multi-Agent / 人工确认节点。
 
 **前端何时再动：**
 
@@ -1008,6 +1009,73 @@ curl -s http://localhost:3000/tasks/真实UUID | jq '{status: .task.status, erro
 
 ---
 
+### E.9 任务观测与成本统计（metrics）
+
+| | |
+|--|--|
+| **状态** | 已完成 |
+| **目标** | 按 `taskId` 聚合耗时 / LLM token / 估算成本；与 `plannerTrace`、未来 `traceId` 概念分离 |
+| **改动范围** | `task_metrics` 表、`TaskMetricsCollector`、Hunyuan `onLlmCall`、`GET /tasks` 的 `metrics`、契约、replay |
+| **学习笔记** | [`docs/backend-learning/task-metrics-notes.md`](backend-learning/task-metrics-notes.md) |
+
+#### 已交付
+
+| 项 | 说明 |
+|----|------|
+| **表 `task_metrics`** | 迁移 `006_task_metrics.sql`；按 task 一行聚合 + `llm_calls` JSONB 明细 |
+| **采集** | `HunyuanLlmClient` 在 plan/answer/summarize 的 finally 调 `onLlmCall`；流式 answer 开 `include_usage` |
+| **聚合** | `TaskRunner` 建 `TaskMetricsCollector`，结束时（成功/失败/取消）`saveTaskMetrics` |
+| **API** | `GET /tasks/:id` 增 `metrics`（旧任务 / 未结束可为 `null`） |
+| **估算成本** | `LLM_PRICE_PROMPT_PER_1M_USD` / `LLM_PRICE_COMPLETION_PER_1M_USD`（学习占位，非账单） |
+| **replay** | `task:replay` 同步打印 metrics |
+
+#### 测试方法
+
+```bash
+pnpm run check:all
+pnpm run db:migrate
+
+# 不经 HTTP：直连 TaskRunner 验证落库
+pnpm run smoke:metrics
+# 预期：metrics.llmCallCount >= 1；totalTokens > 0；llmCalls 含 plan/answer
+
+# 经 HTTP（须重启已加载 E.9 的 dev:server）
+pnpm run dev:server
+TASK_ID=$(curl -s -X POST http://localhost:3000/agent/run \
+  -H 'content-type: application/json' \
+  -d '{"input":"请调用 time 工具，用一句话告诉我当前时间"}' | jq -r .taskId)
+
+curl -s http://localhost:3000/tasks/$TASK_ID | jq '.metrics'
+pnpm run task:replay -- $TASK_ID
+```
+
+- **失败排查：** `metrics: null` → 任务仍 running，或迁移未跑 `006`；token 全 0 → 上游未返回 usage（可看 `llmCalls[].promptTokens`）
+- **改单价对照：** 改 `.env` 的 `LLM_PRICE_*` 后重启 server，再跑任务看 `estimatedCostUsd`
+
+#### 学习要点
+
+1. **观测按业务主键聚合**：本仓库用 `taskId`，不必先上 OTel `traceId`。
+2. **三种追踪别混**：`metrics`（慢/贵）≠ `plannerTrace`（为何选工具）≠ `traceId`（跨服务链路，未做）。展开见 [`task-metrics-notes.md`](backend-learning/task-metrics-notes.md)。
+3. **用量从 LLM 响应里抽**：非流式看 `completion.usage`；流式要 `stream_options.include_usage`；**不是**按字符数。
+4. **估算成本是产品化预习**：单价可配置；当场写入；**不**对历史行重算；真实账单仍以供应商控制台为准。
+5. **观测失败不拖垮任务**：`saveTaskMetrics` 失败只打 error 日志，不改 `tasks.status`。
+
+#### 代码怎么读
+
+| 顺序 | 文件 | 看什么 |
+|------|------|--------|
+| 1 | `apps/api/infra/postgres/init/006_task_metrics.sql` | 表字段与 llm_calls JSONB |
+| 2 | `apps/api/src/runtime/task-metrics.ts` | Collector / 成本公式 / readLlmTokenUsage |
+| 3 | `apps/api/src/llm/hunyuan-llm-client.ts` | finally `emitLlmCall`；stream `include_usage` |
+| 4 | `apps/api/src/agents/planner-agent.ts` | `onLlmCall: metrics.recordLlmCall` |
+| 5 | `apps/api/src/runtime/task-runner.ts` | 创建 collector → `persistMetrics` |
+| 6 | `apps/api/src/server.ts` | GET /tasks 返回 `metrics` |
+| 7 | `packages/api-contract/src/schemas.ts` | `TaskMetricsSchema` |
+
+心智模型：`LLM usage` → `onLlmCall` → `TaskMetricsCollector` → `task_metrics` → `GET /tasks.metrics`。
+
+---
+
 ### E.5 执行顺序小结（历史 P0–P4）
 
 ```text
@@ -1022,6 +1090,7 @@ P5.5 E.6-B 新工具 list_dir              ← 已完成
 P6   E.7-A 轻量 RAG search_docs         ← 已完成
 P6.5 E.7-B 向量 RAG（embedding）       ← 已完成
 P7   E.8 任务取消 + 超时                 ← 已完成
+P8   E.9 任务观测与成本统计（metrics）   ← 已完成
 ```
 
 前端 Step 2/4 **不阻塞** E.1–E.2、E.4；**E.3 / E.3.5 必须带前端**（E.3.5 为 Step 5 主验收）。
@@ -1063,6 +1132,7 @@ P7   E.8 任务取消 + 超时                 ← 已完成
 | **Planner 决策链** | 每轮 `llm.plan` 要不要工具、选哪个、outcome | **`plannerTrace`** | `planner_steps` | 为什么调了 time？走了几步 plan？ |
 | **工具执行** | 工具实际 input/output、成功失败 | **`toolCalls`** | `tool_calls` | 工具跑没跑、结果是什么？ |
 | **对话时间线** | user / assistant / tool 消息 | **`messages`** | `messages` | 对话里留下了什么？ |
+| **任务观测** | 耗时、token、估算成本 | **`metrics`** | `task_metrics` | 这次任务多慢、多贵？ |
 | **SSE 过程事件** | 进行中 thinking / tool / token | **`AgentStreamEvent.type`** | （不落库，仅 SSE） | 现在进行到哪一步？ |
 
 ```text
@@ -1077,8 +1147,9 @@ P7   E.8 任务取消 + 超时                 ← 已完成
 | 场景 | 用什么 | 不要用什么 |
 |------|--------|------------|
 | Agent Planner 每步决策 | `plannerTrace` / `planner_steps` | `trace`、`decisionTrace`（未统一前勿新增同义名） |
+| 任务耗时 / token / 成本 | `metrics` / `task_metrics` | `trace`、与 `plannerTrace` 混用 |
 | SSE 进行中事件 | `AgentStreamEvent.type`（`thinking`、`tool_start`…） | `trace`、与 `plannerTrace` 混用 |
-| HTTP/RPC 全链路 | `traceId`、`spanId`（未来） | 复用 `plannerTrace` |
+| HTTP/RPC 全链路 | `traceId`、`spanId`（未来） | 复用 `plannerTrace` 或 `metrics` |
 | 一次 Agent 任务主键 | `taskId`（已有） | 与 `traceId` 混为一谈 |
 
 ### 新增字段自检（合并前过一遍）
@@ -1088,13 +1159,12 @@ P7   E.8 任务取消 + 超时                 ← 已完成
 3. 契约（`packages/api-contract`）、`server.ts`、`replay-task.ts`、注释、文档是否**同名同步**？
 4. 若引入新表，API 字段是否与表名有清晰映射（如 `planner_steps` → `plannerTrace`）？
 
-### 已落地示例（E.2）
+### 已落地示例
 
-- 表：`planner_steps`（决策快照）
-- 方法：`recordPlannerStep` / `listTaskPlannerSteps`
-- API / replay / 契约：**`plannerTrace`**（不用 `trace`）
+- E.2：表 `planner_steps` → API **`plannerTrace`**（不用 `trace`）
+- E.9：表 `task_metrics` → API **`metrics`**（用量/估费；≠ `traceId`）
 
-细节见 `docs/http-api.md` Get Task Detail 与【E 节】E.2。
+细节见 `docs/http-api.md` Get Task Detail、【E 节】E.2 / E.9，以及 [`task-metrics-notes.md`](backend-learning/task-metrics-notes.md)。
 
 ---
 
@@ -1104,6 +1174,7 @@ P7   E.8 任务取消 + 超时                 ← 已完成
 |------|------|
 | **本文件** | 进度与下一步（状态源）；【E 节】交付约定；【H 节】命名约定 |
 | **`docs/backend-learning/agent-core-flow.md`** | **Agent 完整原理手册（HTTP→落库→Session→Eval→安全）** |
+| **`docs/backend-learning/task-metrics-notes.md`** | **E.9：metrics / plannerTrace / traceId；估费野路子** |
 | **`docs/backend-learning/`** | HTTP body / Agent 全链路 / Debug / 400 details 概念笔记 |
 | **`docs/consolidation-week.md`** | **E.5 巩固周完整手册**（Day 1–5 详细任务） |
 | `docs/fullstack-frontend-plan.md` | 前后端技术选型与 Step 设计 |
@@ -1134,6 +1205,8 @@ pnpm run dev                 # CLI 单次 demo（不用于前端联调）
 # 回归与排查
 pnpm run evals:run
 pnpm run rag:index
+pnpm run smoke:metrics
+pnpm run smoke:cancel
 pnpm run task:replay -- <taskId>
 
 # 类型与构建

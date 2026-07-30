@@ -1,8 +1,9 @@
 /**
  * MemoryStore：Agent 运行时与 PostgreSQL 之间的抽象接口。
- * sessions / tasks / messages / tool_calls / planner_steps 五张表的读写都经此接口，
+ * sessions / tasks / messages / tool_calls / planner_steps / task_metrics 的读写都经此接口，
  * 便于以后换存储实现（测试可用 in-memory-store）。
  */
+import type { TaskMetricsRecord } from "../runtime/task-metrics.js";
 import type {
   PlannerStepOutcome,
   PlannerStepRecord,
@@ -100,4 +101,7 @@ export interface MemoryStore {
   listTaskToolCalls(taskId: string): Promise<ToolCallRecord[]>;
   recordPlannerStep(input: RecordPlannerStepInput): Promise<void>;
   listTaskPlannerSteps(taskId: string): Promise<PlannerStepRecord[]>;
+  /** E.9：任务结束后写入聚合观测；旧任务可能没有 metrics 行 */
+  saveTaskMetrics(input: TaskMetricsRecord): Promise<void>;
+  getTaskMetrics(taskId: string): Promise<TaskMetricsRecord | null>;
 }

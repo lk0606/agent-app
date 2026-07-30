@@ -73,7 +73,8 @@ server.ts（run 之后）
 | `tool_failed` | 工具抛错 | 记库后 **throw**，TaskRunner 标 failed |
 | `fallback_answer` | 循环跑满 maxSteps 仍无回答 | 用最后工具结果强行回答 |
 
-`planner_steps.outcome` 对应调试面板 **plannerTrace**；`tool_calls` 对应 **toolCalls**。
+`planner_steps.outcome` 对应调试面板 **plannerTrace**；`tool_calls` 对应 **toolCalls**；  
+任务耗时/token/估费看 **metrics**（`task_metrics`，E.9）。三者与 `traceId` 差别见 [task-metrics-notes.md](./task-metrics-notes.md)。
 
 ## 两种典型路径
 
@@ -135,12 +136,14 @@ export TASK_ID=$(jq -r .taskId /tmp/run.json)
 curl -s http://localhost:3000/tasks/$TASK_ID | jq '{
   status: .task.status,
   plannerTrace: [.plannerTrace[].outcome],
-  tools: [.toolCalls[].toolName]
+  tools: [.toolCalls[].toolName],
+  metrics: (.metrics | {durationMs, totalTokens, estimatedCostUsd})
 }'
 ```
 
 ## 相关文档
 
 - [http-request-body.md](./http-request-body.md) — run 之前的 body 解析
+- [task-metrics-notes.md](./task-metrics-notes.md) — E.9 metrics / 估费 / 与 plannerTrace、traceId
 - [tool-execution-chain.md](./tool-execution-chain.md) — Tool 选型、execute、落库专链
 - [consolidation-week.md](../consolidation-week.md) Day 1–2

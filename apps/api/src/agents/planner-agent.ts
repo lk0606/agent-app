@@ -65,6 +65,8 @@ export class PlannerAgent implements Agent {
           toolOutput: call.output,
         })),
         signal: context.signal,
+        // E.9：把本次 plan 的 token/耗时报给 TaskMetricsCollector
+        onLlmCall: (event) => context.metrics?.recordLlmCall(event),
       });
 
       throwIfAborted(context.signal);
@@ -363,6 +365,7 @@ export class PlannerAgent implements Agent {
         toolInput: toolCall.input,
         toolOutput: toolCall.output,
         signal: context.signal,
+        onLlmCall: (event) => context.metrics?.recordLlmCall(event),
       },
       {
         onToken: createTokenHandler(context.emitStream, request.taskId, streamedFlag),
@@ -415,6 +418,7 @@ export class PlannerAgent implements Agent {
       messages: this.applyCharBudget(messagesToSummarize, this.options.sessionHistoryCharBudget * 2),
       currentUserInput: request.input,
       signal: context.signal,
+      onLlmCall: (event) => context.metrics?.recordLlmCall(event),
     });
 
     await context.memory.updateSession(sessionId, {

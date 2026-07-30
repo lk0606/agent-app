@@ -98,6 +98,11 @@ export function createAgentRuntime(config: AppConfig) {
     logger,
     runningTasks,
     defaultTimeoutMs: config.agentTaskTimeoutMs,
+    // E.9：估算成本单价注入 TaskMetricsCollector
+    metricsPricing: {
+      promptPer1MUsd: config.llmPricePromptPer1MUsd,
+      completionPer1MUsd: config.llmPriceCompletionPer1MUsd,
+    },
   });
 
   return {

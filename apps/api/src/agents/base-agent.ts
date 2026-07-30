@@ -5,6 +5,7 @@
 import type { AgentStreamEvent } from "@agent-app/api-contract";
 import type { LlmClient } from "../llm/llm-client.js";
 import type { MemoryStore } from "../memory/memory-store.js";
+import type { TaskMetricsCollector } from "../runtime/task-metrics.js";
 import type { Logger } from "../shared/logger.js";
 import type { Tool } from "../tools/tool.js";
 
@@ -20,6 +21,11 @@ export interface AgentContext {
    * 来源为 TaskRunner 内部 AbortController（cancel API / 客户端断开 / 超时共用）。
    */
   signal?: AbortSignal;
+  /**
+   * E.9：任务级 token/耗时聚合器。LLM 经 onLlmCall 写入；结束由 TaskRunner 落库 task_metrics。
+   * 与 plannerTrace（决策链）、OpenTelemetry traceId 都不是同一概念。
+   */
+  metrics?: TaskMetricsCollector;
 }
 
 export interface AgentRequest {

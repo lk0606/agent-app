@@ -172,22 +172,24 @@ async function main(): Promise<void> {
         return;
       }
 
-      // --- Task 详情：一次返回对话、工具执行、规划决策链（plannerTrace）---
+      // --- Task 详情：对话、工具、规划决策链、E.9 成本/耗时聚合 ---
       if (req.method === "GET" && pathSegments[0] === "tasks" && pathSegments.length === 2) {
         const taskId = pathSegments[1];
-        const [task, messages, toolCalls, plannerTrace] = await Promise.all([
+        const [task, messages, toolCalls, plannerTrace, metrics] = await Promise.all([
           memory.getTask(taskId),
           memory.list(taskId),
           memory.listTaskToolCalls(taskId),
           // plannerTrace = planner_steps 决策链；toolCalls = 实际执行过的工具（非分布式 traceId）。
           memory.listTaskPlannerSteps(taskId),
+          // metrics = task_metrics 聚合观测（token/成本）；与 plannerTrace / traceId 都不同。
+          memory.getTaskMetrics(taskId),
         ]);
 
         if (!task) {
           throw new AppError("NOT_FOUND", `Task "${taskId}" was not found.`);
         }
 
-        writeJson(res, HTTP_STATUS.ok, { task, messages, toolCalls, plannerTrace });
+        writeJson(res, HTTP_STATUS.ok, { task, messages, toolCalls, plannerTrace, metrics });
         return;
       }
 

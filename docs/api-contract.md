@@ -100,7 +100,8 @@ pnpm --filter @agent-app/api-contract build
 - **禁止**用单独字段名 `trace` 表示 Agent 决策链 → 使用 **`plannerTrace`**
 - 工具执行记录 → **`toolCalls`**（表 `tool_calls`）
 - SSE 过程事件 → **`AgentStreamEvent.type`**（`thinking`、`tool_start`…），见 `stream-events.ts`
-- 未来分布式链路 → **`traceId` / `spanId`**，与 `plannerTrace` / SSE 分开
+- 未来分布式链路 → **`traceId` / `spanId`**，与 `plannerTrace` / SSE / `metrics` 分开
+- 任务耗时与 token → **`metrics`**（表 `task_metrics`）
 
 后面如果 API 继续增多，可以再拆成：
 

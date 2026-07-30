@@ -138,12 +138,43 @@ export const ArchiveSessionResponseSchema = z.object({
   session: SessionRecordSchema.nullable(),
 });
 
+/** E.9：单次 LLM HTTP 调用明细（写入 task_metrics.llm_calls） */
+export const LlmCallMetricsSchema = z.object({
+  purpose: z.enum(["plan", "answer", "summarize"]),
+  model: z.string(),
+  promptTokens: z.number().int().nonnegative().nullable(),
+  completionTokens: z.number().int().nonnegative().nullable(),
+  totalTokens: z.number().int().nonnegative().nullable(),
+  durationMs: z.number().int().nonnegative(),
+});
+
+/** E.9：任务聚合观测；关联键是 taskId，不是 traceId */
+export const TaskMetricsSchema = z.object({
+  taskId: z.string(),
+  durationMs: z.number().int().nonnegative(),
+  llmCallCount: z.number().int().nonnegative(),
+  promptTokens: z.number().int().nonnegative(),
+  completionTokens: z.number().int().nonnegative(),
+  totalTokens: z.number().int().nonnegative(),
+  toolCallCount: z.number().int().nonnegative(),
+  plannerStepCount: z.number().int().nonnegative(),
+  /** 学习用估算 USD；无 usage 时为 null */
+  estimatedCostUsd: z.number().nonnegative().nullable(),
+  llmCalls: z.array(LlmCallMetricsSchema),
+});
+
 export const GetTaskResponseSchema = z.object({
   task: TaskRecordSchema,
   messages: z.array(MemoryMessageSchema),
   toolCalls: z.array(ToolCallRecordSchema),
   /** Planner 决策链（非 OpenTelemetry traceId）；命名见 docs/current-status.md 【H 节】 */
   plannerTrace: z.array(PlannerStepRecordSchema),
+  /**
+   * E.9：任务级成本/耗时聚合（表 task_metrics）。
+   * 与 plannerTrace（决策）/ toolCalls（工具执行）/ 未来 traceId（分布式链路）分开。
+   * 旧任务或仍在 running 时可能为 null。
+   */
+  metrics: TaskMetricsSchema.nullable(),
 });
 
 /** POST /tasks/:taskId/cancel（E.8）：请求取消运行中任务 */

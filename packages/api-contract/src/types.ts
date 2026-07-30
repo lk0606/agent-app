@@ -18,6 +18,7 @@ import type {
   RunAgentResponseSchema,
   SessionMemoryMessageSchema,
   SessionRecordSchema,
+  TaskMetricsSchema,
   TaskRecordSchema,
   ToolCallRecordSchema,
 } from "./schemas.js";
@@ -29,6 +30,7 @@ export type MemoryMessage = z.infer<typeof MemoryMessageSchema>;
 export type SessionMemoryMessage = z.infer<typeof SessionMemoryMessageSchema>;
 export type ToolCallRecord = z.infer<typeof ToolCallRecordSchema>;
 export type PlannerStepRecord = z.infer<typeof PlannerStepRecordSchema>;
+export type TaskMetrics = z.infer<typeof TaskMetricsSchema>;
 
 export type AgentToolCall = z.infer<typeof AgentToolCallSchema>;
 export type AgentResult = z.infer<typeof AgentResultSchema>;

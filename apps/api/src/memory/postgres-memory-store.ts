@@ -18,6 +18,7 @@ import type {
   UpdateSessionInput,
   UpdateTaskInput,
 } from "./memory-store.js";
+import type { TaskMetricsRecord } from "../runtime/task-metrics.js";
 
 type DbTimestamp = {
   toISOString(): string;
@@ -76,6 +77,19 @@ type PlannerStepRow = {
   duration_ms: number;
   created_at: DbTimestamp;
   finished_at: DbTimestamp;
+};
+
+type TaskMetricsRow = {
+  task_id: string;
+  duration_ms: number;
+  llm_call_count: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  tool_call_count: number;
+  planner_step_count: number;
+  estimated_cost_usd: string | number | null;
+  llm_calls: unknown;
 };
 
 /** Postgres 版 MemoryStore：HTTP / TaskRunner / PlannerAgent 落库的唯一实现 */
@@ -461,6 +475,92 @@ export class PostgresMemoryStore implements MemoryStore {
     }));
   }
 
+  async saveTaskMetrics(input: TaskMetricsRecord): Promise<void> {
+    // task_metrics：整任务聚合观测；upsert 以便同 taskId 重跑脚本时覆盖
+    await this.pool.query(
+      `
+        insert into task_metrics (
+          task_id,
+          duration_ms,
+          llm_call_count,
+          prompt_tokens,
+          completion_tokens,
+          total_tokens,
+          tool_call_count,
+          planner_step_count,
+          estimated_cost_usd,
+          llm_calls
+        )
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+        on conflict (task_id) do update set
+          duration_ms = excluded.duration_ms,
+          llm_call_count = excluded.llm_call_count,
+          prompt_tokens = excluded.prompt_tokens,
+          completion_tokens = excluded.completion_tokens,
+          total_tokens = excluded.total_tokens,
+          tool_call_count = excluded.tool_call_count,
+          planner_step_count = excluded.planner_step_count,
+          estimated_cost_usd = excluded.estimated_cost_usd,
+          llm_calls = excluded.llm_calls
+      `,
+      [
+        input.taskId,
+        input.durationMs,
+        input.llmCallCount,
+        input.promptTokens,
+        input.completionTokens,
+        input.totalTokens,
+        input.toolCallCount,
+        input.plannerStepCount,
+        input.estimatedCostUsd,
+        JSON.stringify(input.llmCalls),
+      ],
+    );
+  }
+
+  async getTaskMetrics(taskId: string): Promise<TaskMetricsRecord | null> {
+    const result = await this.pool.query<TaskMetricsRow>(
+      `
+        select
+          task_id,
+          duration_ms,
+          llm_call_count,
+          prompt_tokens,
+          completion_tokens,
+          total_tokens,
+          tool_call_count,
+          planner_step_count,
+          estimated_cost_usd,
+          llm_calls
+        from task_metrics
+        where task_id = $1
+      `,
+      [taskId],
+    );
+
+    const row = result.rows[0];
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      taskId: row.task_id,
+      durationMs: row.duration_ms,
+      llmCallCount: row.llm_call_count,
+      promptTokens: row.prompt_tokens,
+      completionTokens: row.completion_tokens,
+      totalTokens: row.total_tokens,
+      toolCallCount: row.tool_call_count,
+      plannerStepCount: row.planner_step_count,
+      estimatedCostUsd:
+        row.estimated_cost_usd === null || row.estimated_cost_usd === undefined
+          ? null
+          : Number(row.estimated_cost_usd),
+      llmCalls: normalizeLlmCallsJson(row.llm_calls),
+    };
+  }
+
   private toSessionRecord(row: SessionRow): SessionRecord {
     return {
       id: row.id,
@@ -489,5 +589,46 @@ export class PostgresMemoryStore implements MemoryStore {
       updatedAt: row.updated_at.toISOString(),
       finishedAt: row.finished_at ? row.finished_at.toISOString() : null,
     };
+  }
+}
+
+/** jsonb 可能是已解析数组或字符串；非法结构时退回空数组，避免 GET /tasks 500 */
+function normalizeLlmCallsJson(value: unknown): TaskMetricsRecord["llmCalls"] {
+  const parsed = typeof value === "string" ? safeJsonParse(value) : value;
+
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+
+  return parsed.flatMap((item) => {
+    if (!item || typeof item !== "object") {
+      return [];
+    }
+
+    const row = item as Record<string, unknown>;
+    const purpose = row.purpose;
+
+    if (purpose !== "plan" && purpose !== "answer" && purpose !== "summarize") {
+      return [];
+    }
+
+    return [
+      {
+        purpose,
+        model: typeof row.model === "string" ? row.model : "unknown",
+        promptTokens: typeof row.promptTokens === "number" ? row.promptTokens : null,
+        completionTokens: typeof row.completionTokens === "number" ? row.completionTokens : null,
+        totalTokens: typeof row.totalTokens === "number" ? row.totalTokens : null,
+        durationMs: typeof row.durationMs === "number" ? row.durationMs : 0,
+      },
+    ];
+  });
+}
+
+function safeJsonParse(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
   }
 }

@@ -18,6 +18,7 @@
     "evals:run": "pnpm --filter @agent-app/api evals:run",
     "rag:index": "pnpm --filter @agent-app/api rag:index",
     "smoke:cancel": "pnpm --filter @agent-app/api smoke:cancel",
+    "smoke:metrics": "pnpm --filter @agent-app/api smoke:metrics",
     "start": "pnpm --filter @agent-app/api start",
     "start:server": "pnpm --filter @agent-app/api start:server",
     "task:replay": "pnpm --filter @agent-app/api task:replay",

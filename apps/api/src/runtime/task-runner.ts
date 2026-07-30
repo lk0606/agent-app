@@ -5,6 +5,7 @@
  *
  * E.8：为每次 run 建 AbortController，登记到 RunningTaskRegistry；
  * 超时 / POST cancel / SSE 断开 → abort → Planner 协作退出 → status=cancelled。
+ * E.9：为每次 run 建 TaskMetricsCollector，结束时写入 task_metrics（token / 耗时 / 估算成本）。
  */
 import type { Agent, AgentRequest, AgentResponse } from "../agents/base-agent.js";
 import type { LlmClient } from "../llm/llm-client.js";
@@ -14,6 +15,7 @@ import type { Logger } from "../shared/logger.js";
 import { isTaskCancellation } from "./abort-utils.js";
 import type { StreamEmitter } from "./agent-stream.js";
 import type { RunningTaskRegistry } from "./running-task-registry.js";
+import { TaskMetricsCollector, type TaskMetricsPricing } from "./task-metrics.js";
 import type { Tool } from "../tools/tool.js";
 
 export interface TaskRunnerDeps {
@@ -26,6 +28,8 @@ export interface TaskRunnerDeps {
   runningTasks: RunningTaskRegistry;
   /** 默认整任务超时（ms）；null/undefined 表示不启用，可被单次 run 的 timeoutMs 覆盖 */
   defaultTimeoutMs?: number | null;
+  /** E.9：估算成本单价（USD / 百万 token）；仅学习用 */
+  metricsPricing: TaskMetricsPricing;
 }
 
 export class TaskRunner {
@@ -46,6 +50,7 @@ export class TaskRunner {
     },
   ): Promise<AgentResponse> {
     const logger = this.deps.logger.child({ taskId: request.taskId });
+    const metrics = new TaskMetricsCollector(request.taskId, this.deps.metricsPricing);
     const controller = new AbortController();
     this.deps.runningTasks.register(request.taskId, controller);
 
@@ -106,7 +111,7 @@ export class TaskRunner {
         timestamp: new Date().toISOString(),
       });
 
-      // 4. 核心：Planner 循环；signal 供步进边界协作取消
+      // 4. 核心：Planner 循环；signal 供步进边界协作取消；metrics 收集 LLM 用量
       const result = await this.deps.agent.plan(request, {
         tools: this.deps.tools,
         memory: this.deps.memory,
@@ -114,6 +119,7 @@ export class TaskRunner {
         logger,
         emitStream: options?.emitStream,
         signal: controller.signal,
+        metrics,
       });
 
       const timeline = await this.deps.memory.list(request.taskId);
@@ -131,6 +137,8 @@ export class TaskRunner {
         finishedAt: new Date().toISOString(),
       });
 
+      await this.persistMetrics(request.taskId, metrics, logger);
+
       return result;
     } catch (error: unknown) {
       const appError = classifyError(error);
@@ -143,6 +151,8 @@ export class TaskRunner {
           errorMessage: appError.message,
           finishedAt: new Date().toISOString(),
         });
+
+        await this.persistMetrics(request.taskId, metrics, logger);
 
         logger.info("Task cancelled", {
           code: appError.code,
@@ -157,6 +167,8 @@ export class TaskRunner {
         errorMessage: appError.message,
         finishedAt: new Date().toISOString(),
       });
+
+      await this.persistMetrics(request.taskId, metrics, logger);
 
       logger.error("Task failed", {
         code: appError.code,
@@ -174,6 +186,48 @@ export class TaskRunner {
       }
 
       this.deps.runningTasks.unregister(request.taskId);
+    }
+  }
+
+  /**
+   * 从已落库的 tool_calls / planner_steps 取「行数」填进 metrics，再写入 task_metrics。
+   *
+   * 这里不是重算费用，也不是回放旧任务：
+   * - Collector 里已有 LLM token / 估费
+   * - 列表查询只为拿 toolCallCount / plannerStepCount（.length）
+   *   用 DB 真相，避免成功路径用内存计数、取消路径漏计导致对不齐
+   * 失败不阻断主流程（观测丢失优于任务状态回滚）。
+   */
+  private async persistMetrics(
+    taskId: string,
+    metrics: TaskMetricsCollector,
+    logger: Logger,
+  ): Promise<void> {
+    try {
+      // 并行读两张已有表；只要条数，不要逐行重算 token
+      const [toolCalls, plannerSteps] = await Promise.all([
+        this.deps.memory.listTaskToolCalls(taskId),
+        this.deps.memory.listTaskPlannerSteps(taskId),
+      ]);
+
+      const record = metrics.finalize({
+        toolCallCount: toolCalls.length,
+        plannerStepCount: plannerSteps.length,
+      });
+
+      await this.deps.memory.saveTaskMetrics(record);
+
+      logger.info("Task metrics saved", {
+        durationMs: record.durationMs,
+        llmCallCount: record.llmCallCount,
+        totalTokens: record.totalTokens,
+        estimatedCostUsd: record.estimatedCostUsd,
+      });
+    } catch (error: unknown) {
+      logger.error("Failed to save task metrics", {
+        taskId,
+        cause: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 }

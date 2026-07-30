@@ -3,11 +3,13 @@
  * model / baseURL 来自 env；旧 api.hunyuan.cloud.tencent.com 的 Key 不能用于 TokenHub。
  *
  * E.8.5：create(body, { signal }) —— signal 在第二参数 RequestOptions，不在 body。
+ * E.9：每次调用在 finally 里 onLlmCall 回报 usage + durationMs（供 task_metrics）。
  */
 import OpenAI from "openai";
 
 import { AppError } from "../shared/app-error.js";
 import { rethrowIfLlmAborted, throwIfAborted } from "../runtime/abort-utils.js";
+import { readLlmTokenUsage, type LlmCallMetrics, type LlmTokenUsage } from "../runtime/task-metrics.js";
 import type { AnswerRequest, LlmClient, LlmStreamOptions, PlanRequest, PlannerDecision, SessionSummaryRequest } from "./llm-client.js";
 
 export class HunyuanLlmClient implements LlmClient {
@@ -25,6 +27,9 @@ export class HunyuanLlmClient implements LlmClient {
    * 返回 PlannerDecision 给 PlannerAgent.plan() 的 A 步，不执行工具本身。
    */
   async plan(input: PlanRequest): Promise<PlannerDecision> {
+    const startedAt = Date.now();
+    let usage: LlmTokenUsage | null = null;
+
     try {
       // 1. 调混元 chat.completions：system 规则 + user 上下文 + tools 定义
       const completion = await this.client.chat.completions.create({
@@ -74,6 +79,8 @@ export class HunyuanLlmClient implements LlmClient {
         tool_choice: "auto",
       }, { signal: input.signal });
 
+      usage = readLlmTokenUsage(completion.usage);
+
       // 3. 解析模型回复：有 tool_calls → 要工具；否则 → 直接回答
       const message = completion.choices[0]?.message;
       const toolCall = message?.tool_calls?.[0];
@@ -100,11 +107,16 @@ export class HunyuanLlmClient implements LlmClient {
     } catch (error: unknown) {
       rethrowIfLlmAborted(error);
       throw new AppError("LLM_ERROR", "Hunyuan planning request failed.", { cause: stringifyError(error) });
+    } finally {
+      this.emitLlmCall(input.onLlmCall, "plan", usage, startedAt);
     }
   }
 
   // 工具执行后再让模型组织自然语言；stream: true 时通过 onToken 逐 delta 推送。
   async answerWithTool(input: AnswerRequest, options?: LlmStreamOptions): Promise<string> {
+    const startedAt = Date.now();
+    let usage: LlmTokenUsage | null = null;
+
     try {
       const messages = [
         {
@@ -133,6 +145,8 @@ export class HunyuanLlmClient implements LlmClient {
             model: this.options.model,
             messages,
             stream: true,
+            // 流式默认不带 usage；打开后末包会带 usage，供 E.9 成本统计
+            stream_options: { include_usage: true },
           },
           { signal: input.signal },
         );
@@ -142,6 +156,10 @@ export class HunyuanLlmClient implements LlmClient {
         for await (const chunk of stream) {
           // stream 迭代中途协作退出；SDK 在 signal abort 时也会抛，catch 里 rethrowIfLlmAborted
           throwIfAborted(input.signal);
+
+          if (chunk.usage) {
+            usage = readLlmTokenUsage(chunk.usage);
+          }
 
           const delta = chunk.choices[0]?.delta?.content;
 
@@ -162,16 +180,22 @@ export class HunyuanLlmClient implements LlmClient {
         { signal: input.signal },
       );
 
+      usage = readLlmTokenUsage(completion.usage);
       const message = completion.choices[0]?.message;
       return this.readMessageContent(message?.content);
     } catch (error: unknown) {
       rethrowIfLlmAborted(error);
       throw new AppError("LLM_ERROR", "Hunyuan answer generation failed.", { cause: stringifyError(error) });
+    } finally {
+      this.emitLlmCall(input.onLlmCall, "answer", usage, startedAt);
     }
   }
 
   // 将旧会话压缩成稳定摘要，后续请求可复用，降低长会话的 token 和延迟成本。
   async summarizeSession(input: SessionSummaryRequest): Promise<string> {
+    const startedAt = Date.now();
+    let usage: LlmTokenUsage | null = null;
+
     try {
       const completion = await this.client.chat.completions.create(
         {
@@ -202,12 +226,30 @@ export class HunyuanLlmClient implements LlmClient {
         { signal: input.signal },
       );
 
+      usage = readLlmTokenUsage(completion.usage);
       const message = completion.choices[0]?.message;
       return this.readMessageContent(message?.content);
     } catch (error: unknown) {
       rethrowIfLlmAborted(error);
       throw new AppError("LLM_ERROR", "Hunyuan session summarization failed.", { cause: stringifyError(error) });
+    } finally {
+      this.emitLlmCall(input.onLlmCall, "summarize", usage, startedAt);
     }
+  }
+
+  /** E.9：把单次 LLM 调用观测交给上层 TaskMetricsCollector */
+  private emitLlmCall(
+    onLlmCall: ((event: LlmCallMetrics) => void) | undefined,
+    purpose: LlmCallMetrics["purpose"],
+    usage: LlmTokenUsage | null,
+    startedAt: number,
+  ): void {
+    onLlmCall?.({
+      purpose,
+      model: this.options.model,
+      usage,
+      durationMs: Date.now() - startedAt,
+    });
   }
 
   // Function calling 的 arguments 是字符串，解析失败时回退到空对象让上层用默认输入兜底。

@@ -49,6 +49,7 @@ HTTP 入口 (server.ts)
 | message timeline | `GET .../messages` → `messages` 表 |
 | task status / error | `GET /tasks/:id` → `tasks` 表 |
 | plannerTrace | `planner_steps` 表，非 OpenTelemetry trace |
+| metrics（任务耗时/token/估费） | `task_metrics` 表；≠ plannerTrace，≠ traceId |
 | RunTimeline 工具卡 | `tool_calls` 表 + SSE `tool_*` 事件 |
 
 ## 不要做

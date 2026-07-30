@@ -1,8 +1,9 @@
 # Agent 完整原理手册
 
-> **定位：** 理解本仓库 Agent 后端的**唯一深读文档**——从 HTTP 进门到落库、Session 记忆、SSE、Eval/Replay、工具安全、五张表，全部串在一起。  
+> **定位：** 理解本仓库 Agent 后端的**唯一深读文档**——从 HTTP 进门到落库、Session 记忆、SSE、Eval/Replay、工具安全、观测 metrics，全部串在一起。  
 > 巩固周每日任务与命令见 [`docs/consolidation-week.md`](../consolidation-week.md)。  
-> 进度状态见 [`docs/current-status.md`](../current-status.md)。
+> 进度状态见 [`docs/current-status.md`](../current-status.md)。  
+> E.9 用量/成本详解：[`task-metrics-notes.md`](./task-metrics-notes.md)。
 
 ---
 
@@ -18,12 +19,12 @@
 8. [Session 上下文（summary + window）](#session-上下文summary--window)
 9. [HunyuanLlmClient 三次 LLM](#hunyuanllmclient-三次-llm)
 10. [工具层与安全治理](#工具层与安全治理)
-11. [Memory 五张表](#memory-五张表)
+11. [Memory 表与观测](#memory-表与观测)
 12. [SSE 流式与 emitStream](#sse-流式与-emitstream)
 13. [契约层 api-contract](#契约层-api-contract)
 14. [Eval 与 Task Replay](#eval-与-task-replay)
 15. [失败路径全景](#失败路径全景)
-16. [命名：plannerTrace vs trace](#命名plannertrace-vs-trace)
+16. [命名：plannerTrace / metrics / traceId](#命名plannertrace--metrics--traceid)
 17. [配置与环境](#配置与环境)
 18. [两条完整路径 + 手测命令](#两条完整路径--手测命令)
 19. [读代码路线图](#读代码路线图)
@@ -39,7 +40,8 @@
 | 5 分钟建立全局观 | [核心思想](#核心思想三句话) + [展开总图](#展开总图实现细节版) |
 | 跟一次请求全链路 | [两条完整路径](#两条完整路径--手测命令) |
 | 搞懂长会话记忆 | [Session 上下文](#session-上下文summary--window) |
-| 搞懂调试面板三块数据 | [Memory 五张表](#memory-五张表) + [命名](#命名plannertrace-vs-trace) |
+| 搞懂调试面板三块数据 | [Memory 表与观测](#memory-表与观测) + [命名](#命名plannertrace--metrics--traceid) |
+| 搞懂任务耗时 / token / 估费 | [`task-metrics-notes.md`](./task-metrics-notes.md) |
 | 改 prompt 怎么验证 | [Eval 与 Replay](#eval-与-task-replay) |
 | 工具为什么被拦 | [工具层与安全](#工具层与安全治理) |
 | 搞懂「记忆追问」与「要不要工具」 | [常见追问](#常见追问学习笔记) §Q1–Q3 |
@@ -117,6 +119,7 @@ curl POST /agent/run 或 /agent/stream
                                   ▼
 ┌─ 落库与观测 ────────────────────────────────────────────────────┐
 │  sessions | tasks | messages | planner_steps | tool_calls         │
+│  task_metrics（E.9：耗时 / token / 估算成本）                      │
 │  GET /tasks/:id  +  SSE（仅进行中，不落库）                        │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -178,7 +181,7 @@ loadConfig()
 | Agent 执行 | `POST /agent/run` | 同步 JSON |
 | Agent 执行 | `POST /agent/stream` | SSE 流式 |
 | Session | `GET /sessions`、`GET .../messages`、`PATCH .../archive` | 列表/历史/归档 |
-| Task 观测 | `GET /tasks/:id` | task + messages + toolCalls + plannerTrace |
+| Task 观测 | `GET /tasks/:id` | task + messages + toolCalls + plannerTrace + **metrics**（E.9） |
 | 健康 | `GET /health` | 探活 |
 
 ### `readJsonBody`：body 不在 `req` 上
@@ -238,17 +241,17 @@ for await (chunk of req) → Buffer.concat → JSON.parse
 | ① | `createTask(running)` | `tasks` | 立刻可观测 |
 | ② | `updateSession(lastTaskAt)` | `sessions` | 列表排序 |
 | ③ | `append(user, input)` | `messages` | 本轮用户话；Planner 读历史用 |
-| ④ | `agent.plan(request, context)` | 多表 | **核心** |
-| ⑤ | `updateTask(succeeded, summary)` | `tasks` | |
-| ⑥ | catch → `updateTask(failed)` | `tasks` | 再 throw |
+| ④ | `agent.plan(request, context)` | 多表 | **核心**（含 LLM onLlmCall → metrics） |
+| ⑤ | `updateTask(succeeded/failed/cancelled)` | `tasks` | |
+| ⑥ | `persistMetrics` → `saveTaskMetrics` | `task_metrics` | E.9：当场估费落库，不回算历史 |
 
 **注入给 plan 的 context：**
 
 ```ts
-{ tools, memory, llm, logger, emitStream? }
+{ tools, memory, llm, logger, emitStream?, signal?, metrics? }
 ```
 
-**不做：** 不调混元、不选工具、不写 `planner_steps`。
+**不做：** 不调混元、不选工具、不写 `planner_steps`（那些在 Planner）；metrics 只在 run 结束时由 Runner 汇总写入。
 
 ---
 
@@ -429,11 +432,12 @@ emitStream(tool_start)
 
 ---
 
-## Memory 五张表
+## Memory 表与观测
 
 接口：`apps/api/src/memory/memory-store.ts`  
 实现：`apps/api/src/memory/postgres-memory-store.ts`  
-类型：`apps/api/src/memory/persistence-model.ts`
+类型：`apps/api/src/memory/persistence-model.ts`  
+E.9 详解：[`task-metrics-notes.md`](./task-metrics-notes.md)
 
 | 表 | API 字段 | 写什么 | 谁写 | 读什么 |
 |----|----------|--------|------|--------|
@@ -442,14 +446,16 @@ emitStream(tool_start)
 | `messages` | `.../messages` 或 task 内 | user / assistant / **tool** 文本 | TaskRunner(user), Planner(assistant/tool) | 对话时间线 |
 | `tool_calls` | `toolCalls` | 工具 input/output、status | Planner 工具分支 | **实际执行** |
 | `planner_steps` | `plannerTrace` | needsTool, outcome, toolName | Planner `recordStep` | **规划决策** |
+| `task_metrics` | `metrics` | 耗时、token、估算成本、llmCalls 明细 | TaskRunner `persistMetrics` | **用量/估费** |
 
-### 三个概念别混
+### 四个概念别混
 
 | 问题 | 看哪 |
 |------|------|
 | 模型**想**干什么？ | `plannerTrace` / `planner_steps` |
 | 工具**真**跑了什么？ | `toolCalls` / `tool_calls` |
 | 对话里**说了**什么？ | `messages` |
+| 这次任务**多慢/多贵**？ | `metrics` / `task_metrics` |
 
 **禁止**把 Agent 决策链叫 `trace`（易与 OpenTelemetry `traceId` 混淆）。见 `docs/current-status.md` 【H 节】。
 
@@ -462,6 +468,7 @@ emitStream(tool_start)
 | `append` / `list` / `listAllSessionMessages` | messages |
 | `recordToolCall` / `listTaskToolCalls` | 工具执行 |
 | `recordPlannerStep` / `listTaskPlannerSteps` | 规划决策 |
+| `saveTaskMetrics` / `getTaskMetrics` | E.9 任务观测 |
 
 ---
 
@@ -541,9 +548,9 @@ done
 pnpm run task:replay -- <taskId>
 ```
 
-从 DB 还原：`task` + `messages` + `toolCalls` + `plannerTrace`（与 `GET /tasks/:id` 同结构）。
+从 DB 还原：`task` + `messages` + `toolCalls` + `plannerTrace` + `metrics`（与 `GET /tasks/:id` 同结构；旧任务 `metrics` 可能为 null）。
 
-**排查顺序：** eval 报告 failures → 拿 taskId → replay → 看 `plannerTrace.outcome` 与 `toolCalls`。
+**排查顺序：** eval 报告 failures → 拿 taskId → replay → 看 `plannerTrace.outcome` 与 `toolCalls`；问贵/慢再看 `metrics`。
 
 ### 故意改坏实验（巩固周 Day 4）
 
@@ -569,13 +576,17 @@ TaskRunner：**先** `updateTask(failed)` **再** throw，所以失败任务仍�
 
 ---
 
-## 命名：plannerTrace vs trace
+## 命名：plannerTrace / metrics / traceId
 
-| 概念 | 正确命名 | 错误命名 |
-|------|----------|----------|
-| Planner 每轮决策 | `plannerTrace` / `planner_steps` | `trace` |
+| 概念 | 正确命名 | 错误命名 / 易混 |
+|------|----------|-----------------|
+| Planner 每轮决策 | `plannerTrace` / `planner_steps` | 单独叫 `trace` |
+| 任务用量与估算成本 | `metrics` / `task_metrics` | 当成 Cursor 账单台账、或叫 trace |
 | 工具执行 | `toolCalls` / `tool_calls` | — |
-| 分布式链路（未来） | `traceId` / `spanId` | 勿占用 `plannerTrace` |
+| 分布式链路（未来） | `traceId` / `spanId` | 勿占用 `plannerTrace` / `metrics` |
+
+一句话：`plannerTrace` = 怎么规划的；`metrics` = 多慢多贵；`traceId` = 跨服务请求链（未做）。  
+展开示例见 [`task-metrics-notes.md`](./task-metrics-notes.md)。
 
 ---
 
@@ -645,12 +656,13 @@ curl -s -X POST http://localhost:3000/agent/run \
   -H 'content-type: application/json' \
   -d '{"input":"现在几点"}' | tee /tmp/r.json | jq .
 
-# 观测
+# 观测（含 E.9 metrics）
 TASK_ID=$(jq -r .taskId /tmp/r.json)
 curl -s http://localhost:3000/tasks/$TASK_ID | jq '{
   status: .task.status,
   plannerTrace: [.plannerTrace[] | {step, outcome, toolName}],
   toolCalls: [.toolCalls[] | {toolName, status}],
+  metrics: (.metrics | {durationMs, llmCallCount, totalTokens, estimatedCostUsd}),
   messages: [.messages[] | .role]
 }'
 
@@ -702,7 +714,8 @@ server.ts L48-54
 
 - [ ] 能**不看代码**画出四层分工 + TaskRunner 六步 + Planner A–J
 - [ ] 能解释 `sessionId` vs `taskId`；body 为何不在 `req` 上
-- [ ] 能解释 `plannerTrace` vs `toolCalls` vs `messages`
+- [ ] 能解释 `plannerTrace` vs `toolCalls` vs `messages` vs `metrics`
+- [ ] 能说出 `metrics` / `plannerTrace` / `traceId` 三者差别（详见 task-metrics-notes）
 - [ ] 能说出三次 LLM 各自何时调用、典型几次
 - [ ] 能解释 summary + recent window 与 `summaryMessageCount`
 - [ ] 用手动 curl 复现同 session 追问

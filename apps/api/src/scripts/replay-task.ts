@@ -1,6 +1,7 @@
 /**
  * 失败任务排查：`pnpm run task:replay -- <taskId>`。
- * 直接查 DB 打印 task、messages、tool_calls、planner_steps（等同 GET /tasks/:id 的数据面）。
+ * 直接查 DB 打印 task、messages、tool_calls、planner_steps、task_metrics
+ * （等同 GET /tasks/:id 的数据面）。
  */
 import "dotenv/config";
 
@@ -24,7 +25,7 @@ async function main(): Promise<void> {
 
   await verifyPgConnection(pool);
 
-  const [task, messages, toolCalls, plannerTrace] = await Promise.all([
+  const [task, messages, toolCalls, plannerTrace, metrics] = await Promise.all([
     pool.query(
       `
         select id, input, status, summary, error_code, error_message, created_at, updated_at, finished_at
@@ -61,6 +62,25 @@ async function main(): Promise<void> {
       `,
       [taskId],
     ),
+    // task_metrics：E.9 任务级 token/耗时/估算成本；旧任务可能无行。
+    pool.query(
+      `
+        select
+          task_id,
+          duration_ms,
+          llm_call_count,
+          prompt_tokens,
+          completion_tokens,
+          total_tokens,
+          tool_call_count,
+          planner_step_count,
+          estimated_cost_usd,
+          llm_calls
+        from task_metrics
+        where task_id = $1
+      `,
+      [taskId],
+    ),
   ]);
 
   console.log(
@@ -70,6 +90,7 @@ async function main(): Promise<void> {
         messages: messages.rows,
         toolCalls: toolCalls.rows,
         plannerTrace: plannerTrace.rows,
+        metrics: metrics.rows[0] ?? null,
       },
       null,
       2,

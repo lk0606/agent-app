@@ -23,6 +23,7 @@
 | [search-docs-tool-notes.md](./search-docs-tool-notes.md) | E.7-A：`search_docs` 切块与关键词检索 |
 | [embedding-cosine-notes.md](./embedding-cosine-notes.md) | E.7-B：Embedding + 余弦相似度（入参出参 / 分子分母野路子理解） |
 | [task-cancel-timeout-notes.md](./task-cancel-timeout-notes.md) | E.8：AbortSignal 取消 / 超时；cancelled vs failed |
+| **[task-metrics-notes.md](./task-metrics-notes.md)** | **E.9：metrics / plannerTrace / traceId；估费野路子（优先读）** |
 | [tool-execution-chain.md](./tool-execution-chain.md) | Tool 运行与调用链路；`plan` vs `execute`；读码与调试 |
 
 ## 建议阅读顺序

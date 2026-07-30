@@ -171,12 +171,14 @@ pnpm run task:replay -- <taskId>
 - message 时间线
 - tool_call 明细
 - planner_steps 决策链（E.2 起；HTTP / replay 字段名 `plannerTrace`，非分布式 traceId）
+- task_metrics 用量与估算成本（E.9 起；HTTP / replay 字段名 `metrics`；旧任务可能无行）
 
 这一步很适合排查：
 
 - 为什么模型选了这个工具
 - 为什么任务失败
 - 同一个任务到底跑了几步
+- 这次任务慢在哪次 LLM、大约花多少钱（看 `metrics`）
 
 ## 3. 当前阶段的价值
 

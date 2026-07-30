@@ -14,6 +14,7 @@ const migrations = [
   "003_session_summary.sql",
   "004_planner_steps.sql",
   "005_document_chunks.sql",
+  "006_task_metrics.sql",
 ];
 const apiRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "../..");
 
