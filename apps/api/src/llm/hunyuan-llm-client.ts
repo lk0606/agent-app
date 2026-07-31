@@ -48,6 +48,8 @@ export class HunyuanLlmClient implements LlmClient {
               "If the user asks to list, browse, or enumerate files in the sandbox directory, call the list_dir tool with a relative path or empty input for the root.",
               "If the user asks to search, find, or look up information across sandbox documents without a specific file path, call the search_docs tool with the query.",
               "If the user explicitly asks to wait, sleep, pause, or delay for N seconds, you MUST call the wait tool with that number of seconds. Do not claim wait is unavailable when it is listed in tools.",
+              // E.10：写入走 write_file；真正落盘前会 awaiting_confirmation，由人 confirm
+              "If the user asks to write, create, or save a local text file in the sandbox, call the write_file tool. Input must be either two lines (relative path then content) or JSON {\"path\":\"...\",\"content\":\"...\"}.",
               "If previous tool results are already sufficient, answer directly instead of calling the same tool repeatedly.",
             ].join(" "),
           },

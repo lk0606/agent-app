@@ -2,7 +2,7 @@
 
 这是项目的**唯一进度状态源**。做完一项就更新一项，其他文档只保留设计细节，不再各自维护「已完成 / 下一步」。
 
-最后更新：2026-07-29（E.9 文档补齐：metrics / plannerTrace / traceId）
+最后更新：2026-07-30（E.10 人工确认节点：write_file + confirm API）
 
 ## 30 秒阅读指南
 
@@ -30,6 +30,7 @@
 | 想搞懂 `runner.run` / `plan()` 速查 | [`docs/backend-learning/agent-run-chain.md`](backend-learning/agent-run-chain.md) |
 | 想搞懂 Tool 选型 / execute / 落库 | [`docs/backend-learning/tool-execution-chain.md`](backend-learning/tool-execution-chain.md) |
 | 想搞懂任务用量 / 估费 / 三种追踪差别 | [`docs/backend-learning/task-metrics-notes.md`](backend-learning/task-metrics-notes.md) |
+| 想搞懂人工确认 / write_file 挂起 | [`docs/backend-learning/human-confirm-notes.md`](backend-learning/human-confirm-notes.md) |
 | Agent 运行态 / Cursor 式 SSE 计划 | 本文件 [E.3.5](#e35-agent-运行态完整体验cursor-式) |
 | API / 表 / 字段怎么命名 | 本文件 [【H 节】命名约定](#h-命名约定) |
 | 所有文档分工 | 本文件 [【G 节】文档索引](#g-文档索引) |
@@ -80,8 +81,11 @@ AI / 协作者交付任务时：**聊天里说明 + 源码注释 + 合并前写�
 - **只注释非显而易见的内容**：业务规则、表/字段分工、巧妙判断（如 XOR 校验）、与另一概念的区别（如 `plannerTrace` vs `toolCalls`、vs 分布式 `traceId`）
 - **不注释**一眼能看懂的赋值、import、标准 CRUD
 - **优先注释**：入口脚本、Agent 核心循环、新表/新 API 字段、契约包 schema、迁移 SQL 文件头
+- **位置要求（硬性）**：不能只在文件头 / 函数头写完就交差。多形态解析、安全拦截、互斥失败路径等，必须在**对应分支旁**写短注释；涉及输入输出时附一行示例（合法例 / 必要时非法例）。反例：`parseInput` 函数头写了「支持 JSON 和两行」，但 `startsWith("{")` 分支旁无说明。
+- **文件头「常规执行顺序」（硬性）**：独立类（Registry / Collector）、`tools/*` 等单文件模块，文件头必须用编号写出成功路径谁先谁后（调用方点名），旁注取消/失败旁路。
+- **文件头「本文件执行链路」（硬性）**：文件头一行索引；在对应方法 JSDoc / 步骤旁标 `[1]` `[2]`…（勿只在文件头画长树）。示范：`write-file-tool.ts`。
 
-示例位置（E.1/E.2 已示范）：`run-evals.ts` 的 XOR 校验、`planner-agent.ts` 的 `recordStep`、`004_planner_steps.sql` 表头说明。
+示例位置（E.1/E.2 / E.10 已示范）：`run-evals.ts` 的 XOR 校验、`planner-agent.ts` 的 `recordStep`、`004_planner_steps.sql` 表头、`write-file-tool.ts` 的 JSON vs 两行分支旁注释 + 文件头两段顺序。
 
 **Cursor 规则：** `.cursor/rules/code-comments.mdc`（`alwaysApply: true`，每次改代码时 AI 自动遵循）。
 
@@ -113,7 +117,7 @@ AI / 协作者交付任务时：**聊天里说明 + 源码注释 + 合并前写�
 
 **路线：** 后端优先学习（见【E 节】与 `.cursor/rules/backend-first-learning.mdc`）。前端工作台仅辅助观察后端；日常用 `curl` + `evals:run` + `task:replay` 验证即可。
 
-**当前开发重点：** **E.9 任务观测与成本统计** 已交付（`task_metrics` + `GET /tasks` 的 `metrics`）。可选：加固安全 eval、pgvector、或按 [`docs/learning-plan.md`](learning-plan.md) 继续 Multi-Agent / 人工确认节点。
+**当前开发重点：** **E.10 人工确认节点** 已交付（`write_file` + `awaiting_confirmation` + `POST /tasks/:id/confirm`）。可选：加固安全 eval、Multi-Agent，或独立 `/tasks/[taskId]` 页。
 
 **前端何时再动：**
 
@@ -1076,6 +1080,86 @@ pnpm run task:replay -- $TASK_ID
 
 ---
 
+### E.10 人工确认节点（HITL）
+
+| | |
+|--|--|
+| **状态** | 已完成 |
+| **目标** | 危险工具执行前挂起，等人批准/拒绝后再继续；与 cancel/超时共用 AbortSignal |
+| **改动范围** | `ConfirmationRegistry`、`WriteFileTool`、`PlannerAgent` 门控、`POST /tasks/:id/confirm`、SSE `awaiting_confirmation`、契约、smoke |
+| **学习笔记** | [`docs/backend-learning/human-confirm-notes.md`](backend-learning/human-confirm-notes.md) |
+
+#### 已交付
+
+| 项 | 说明 |
+|----|------|
+| **工具门控** | `Tool.requiresConfirmation`；`write_file` 默认 true（沙箱写 `.txt/.md` 等） |
+| **状态** | `tasks.status=awaiting_confirmation`；契约 `TaskStatus` 同步 |
+| **Registry** | 进程内 Promise；`POST .../confirm` resolve；abort → CANCELLED |
+| **API** | `GET /tasks` 增 `pendingConfirmation`；`POST /tasks/:id/confirm` |
+| **拒绝** | `tool_calls`=`skipped` + `HUMAN_REJECTED`；`plannerTrace.outcome=human_rejected`；任务仍可 succeeded |
+| **cancel** | running / awaiting 均可；孤儿 awaiting 直接落库 cancelled |
+| **eval** | `run-evals.ts` 强制 `CONFIRMATION_AUTO_APPROVE=1` |
+| **smoke** | `pnpm run smoke:confirm` / `-- --decision=reject` |
+
+#### 测试方法
+
+```bash
+pnpm run check:all
+
+# 1. 推荐：自动手测（先起 server，CONFIRMATION_AUTO_APPROVE 须为 false）
+pnpm run dev:server          # 终端 1
+pnpm run smoke:confirm       # 终端 2：approve
+pnpm run smoke:confirm -- --decision=reject
+
+# 2. 手动双终端（approve）
+# 终端 A：
+curl -N -X POST http://localhost:3000/agent/stream \
+  -H 'content-type: application/json' \
+  -d '{"input":"请务必调用 write_file 工具，把内容 hello-hitl 写入相对路径 hitl-demo.txt，完成后一句话确认。"}'
+# 见 event: awaiting_confirmation（此时尚无 tool_start），抄 taskId
+# 终端 B：
+curl -s http://localhost:3000/tasks/<taskId> | jq '{status: .task.status, pendingConfirmation}'
+curl -s -X POST http://localhost:3000/tasks/<taskId>/confirm \
+  -H 'content-type: application/json' \
+  -d '{"decision":"approve"}' | jq .
+curl -s http://localhost:3000/tasks/<taskId> | jq '{
+  status: .task.status,
+  tools: [.toolCalls[] | {toolName, status, errorCode}],
+  pendingConfirmation
+}'
+# 预期：status=succeeded；write_file succeeded；fixtures 下有 hitl-demo.txt
+
+# 3. eval 不挂死
+pnpm run evals:run
+```
+
+- **不要用 time 练确认**：不会进 `awaiting_confirmation`。
+- **失败排查：** 无 awaiting → 模型没选 write_file / server 未重启；confirm accepted=false → 已结束或孤儿；批准后无文件 → 看 `tool_calls.error_*`。
+- **局限：** 进程重启丢失 waiter；本阶段无前端确认按钮。
+
+#### 学习要点
+
+1. **副作用工具要门控**：安全不能只靠 Prompt，要在 `execute` 前工程挂起。
+2. **挂起 = DB 状态 + 进程内未 settle 的 Promise**（不是线程阻塞）：`awaiting_confirmation` 可观测；真正挂住 Planner 的是 `await wait()`；唤醒靠 `confirm` 调 `resolve`。原理见 [`human-confirm-notes.md`](backend-learning/human-confirm-notes.md) §wait 怎么挂起。
+3. **reject ≠ failed**：人拒绝是业务选择，回流模型解释后任务仍可 succeeded。
+4. **与 cancel 共用 AbortSignal**：等人时也能取消/超时（abort → Promise reject）。
+5. **eval 必须自动批准**：否则回归会永久阻塞。
+
+#### 代码怎么读
+
+| 顺序 | 文件 | 看什么 |
+|------|------|--------|
+| 1 | `apps/api/src/tools/tool.ts` / `write-file-tool.ts` | `requiresConfirmation` + 沙箱写 |
+| 2 | `apps/api/src/runtime/confirmation-registry.ts` | wait / resolve / abort |
+| 3 | `apps/api/src/agents/planner-agent.ts` | `awaitHumanConfirmation` |
+| 4 | `apps/api/src/server.ts` | confirm / cancel / pendingConfirmation |
+| 5 | `packages/api-contract/src/schemas.ts` / `stream-events.ts` | 状态与 SSE |
+
+心智模型：`plan → write_file → awaiting_confirmation → confirm → execute|reject → done`。
+
+---
+
 ### E.5 执行顺序小结（历史 P0–P4）
 
 ```text
@@ -1091,6 +1175,7 @@ P6   E.7-A 轻量 RAG search_docs         ← 已完成
 P6.5 E.7-B 向量 RAG（embedding）       ← 已完成
 P7   E.8 任务取消 + 超时                 ← 已完成
 P8   E.9 任务观测与成本统计（metrics）   ← 已完成
+P9   E.10 人工确认节点（HITL）           ← 已完成
 ```
 
 前端 Step 2/4 **不阻塞** E.1–E.2、E.4；**E.3 / E.3.5 必须带前端**（E.3.5 为 Step 5 主验收）。
@@ -1133,7 +1218,8 @@ P8   E.9 任务观测与成本统计（metrics）   ← 已完成
 | **工具执行** | 工具实际 input/output、成功失败 | **`toolCalls`** | `tool_calls` | 工具跑没跑、结果是什么？ |
 | **对话时间线** | user / assistant / tool 消息 | **`messages`** | `messages` | 对话里留下了什么？ |
 | **任务观测** | 耗时、token、估算成本 | **`metrics`** | `task_metrics` | 这次任务多慢、多贵？ |
-| **SSE 过程事件** | 进行中 thinking / tool / token | **`AgentStreamEvent.type`** | （不落库，仅 SSE） | 现在进行到哪一步？ |
+| **人工确认挂起** | 危险工具等人批准 | **`pendingConfirmation`** / status **`awaiting_confirmation`** | （载荷在进程内 Registry） | 卡在哪个工具、参数是什么？ |
+| **SSE 过程事件** | 进行中 thinking / tool / token / awaiting_confirmation | **`AgentStreamEvent.type`** | （不落库，仅 SSE） | 现在进行到哪一步？ |
 
 ```text
 ❌ 错误：GET /tasks 返回 trace: []     → 易与 OpenTelemetry traceId 混淆
@@ -1207,6 +1293,7 @@ pnpm run evals:run
 pnpm run rag:index
 pnpm run smoke:metrics
 pnpm run smoke:cancel
+pnpm run smoke:confirm
 pnpm run task:replay -- <taskId>
 
 # 类型与构建

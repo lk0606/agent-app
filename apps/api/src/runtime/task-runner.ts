@@ -6,6 +6,7 @@
  * E.8：为每次 run 建 AbortController，登记到 RunningTaskRegistry；
  * 超时 / POST cancel / SSE 断开 → abort → Planner 协作退出 → status=cancelled。
  * E.9：为每次 run 建 TaskMetricsCollector，结束时写入 task_metrics（token / 耗时 / 估算成本）。
+ * E.10：注入 ConfirmationRegistry；危险工具可把 status 暂设为 awaiting_confirmation。
  */
 import type { Agent, AgentRequest, AgentResponse } from "../agents/base-agent.js";
 import type { LlmClient } from "../llm/llm-client.js";
@@ -14,6 +15,7 @@ import { AppError, classifyError } from "../shared/app-error.js";
 import type { Logger } from "../shared/logger.js";
 import { isTaskCancellation } from "./abort-utils.js";
 import type { StreamEmitter } from "./agent-stream.js";
+import type { ConfirmationRegistry } from "./confirmation-registry.js";
 import type { RunningTaskRegistry } from "./running-task-registry.js";
 import { TaskMetricsCollector, type TaskMetricsPricing } from "./task-metrics.js";
 import type { Tool } from "../tools/tool.js";
@@ -26,6 +28,10 @@ export interface TaskRunnerDeps {
   logger: Logger;
   /** 供 cancel API 按 taskId abort */
   runningTasks: RunningTaskRegistry;
+  /** E.10：供 confirm API / Planner 挂起危险工具 */
+  confirmations: ConfirmationRegistry;
+  /** E.10：evals 等无 HTTP 确认方时自动批准 */
+  confirmationAutoApprove?: boolean;
   /** 默认整任务超时（ms）；null/undefined 表示不启用，可被单次 run 的 timeoutMs 覆盖 */
   defaultTimeoutMs?: number | null;
   /** E.9：估算成本单价（USD / 百万 token）；仅学习用 */
@@ -111,7 +117,7 @@ export class TaskRunner {
         timestamp: new Date().toISOString(),
       });
 
-      // 4. 核心：Planner 循环；signal 供步进边界协作取消；metrics 收集 LLM 用量
+      // 4. 核心：Planner 循环；signal 供步进边界协作取消；metrics 收集 LLM 用量；confirmations 供 E.10
       const result = await this.deps.agent.plan(request, {
         tools: this.deps.tools,
         memory: this.deps.memory,
@@ -120,6 +126,8 @@ export class TaskRunner {
         emitStream: options?.emitStream,
         signal: controller.signal,
         metrics,
+        confirmations: this.deps.confirmations,
+        confirmationAutoApprove: this.deps.confirmationAutoApprove,
       });
 
       const timeline = await this.deps.memory.list(request.taskId);
@@ -186,6 +194,8 @@ export class TaskRunner {
       }
 
       this.deps.runningTasks.unregister(request.taskId);
+      // E.10：异常/取消路径下清掉挂起的 confirm waiter，避免 Map 泄漏
+      this.deps.confirmations.clear(request.taskId);
     }
   }
 

@@ -5,6 +5,7 @@
 import type { AgentStreamEvent } from "@agent-app/api-contract";
 import type { LlmClient } from "../llm/llm-client.js";
 import type { MemoryStore } from "../memory/memory-store.js";
+import type { ConfirmationRegistry } from "../runtime/confirmation-registry.js";
 import type { TaskMetricsCollector } from "../runtime/task-metrics.js";
 import type { Logger } from "../shared/logger.js";
 import type { Tool } from "../tools/tool.js";
@@ -26,6 +27,13 @@ export interface AgentContext {
    * 与 plannerTrace（决策链）、OpenTelemetry traceId 都不是同一概念。
    */
   metrics?: TaskMetricsCollector;
+  /**
+   * E.10：人工确认挂起表。requiresConfirmation 工具在 execute 前 wait；
+   * HTTP confirm API 调 resolve。autoApprove 时 eval 不挂死。
+   */
+  confirmations?: ConfirmationRegistry;
+  /** E.10：true 时跳过人工挂起，立刻 approve（evals / smoke 无 HTTP 确认方） */
+  confirmationAutoApprove?: boolean;
 }
 
 export interface AgentRequest {

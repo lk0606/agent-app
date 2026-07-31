@@ -4,8 +4,19 @@
  */
 import { z } from "zod";
 
-/** cancelled：用户取消或任务超时中止（E.8），与 failed（工具/LLM 业务失败）区分 */
-export const TaskStatusSchema = z.enum(["pending", "running", "succeeded", "failed", "cancelled"]);
+/**
+ * cancelled：用户取消或任务超时中止（E.8）
+ * awaiting_confirmation：危险工具执行前等人批准（E.10），与 running 区分
+ * failed：工具/LLM 业务失败
+ */
+export const TaskStatusSchema = z.enum([
+  "pending",
+  "running",
+  "awaiting_confirmation",
+  "succeeded",
+  "failed",
+  "cancelled",
+]);
 
 export const ToolCallStatusSchema = z.enum(["succeeded", "failed", "skipped"]);
 
@@ -58,6 +69,8 @@ export const PlannerStepOutcomeSchema = z.enum([
   "budget_exceeded",
   "duplicate_skipped",
   "fallback_answer",
+  /** E.10：人工拒绝执行需确认的工具（工具未真正跑；任务仍可 succeeded） */
+  "human_rejected",
 ]);
 
 export const PlannerStepRecordSchema = z.object({
@@ -163,6 +176,13 @@ export const TaskMetricsSchema = z.object({
   llmCalls: z.array(LlmCallMetricsSchema),
 });
 
+/** E.10：当前挂起等待人工确认的工具信息（进程内；无 waiter 时为 null） */
+export const PendingConfirmationSchema = z.object({
+  step: z.number().int().positive(),
+  toolName: z.string(),
+  toolInput: z.string(),
+});
+
 export const GetTaskResponseSchema = z.object({
   task: TaskRecordSchema,
   messages: z.array(MemoryMessageSchema),
@@ -175,14 +195,39 @@ export const GetTaskResponseSchema = z.object({
    * 旧任务或仍在 running 时可能为 null。
    */
   metrics: TaskMetricsSchema.nullable(),
+  /**
+   * E.10：status=awaiting_confirmation 且本进程仍有 waiter 时非 null。
+   * 进程重启后孤儿任务可能 status 仍为 awaiting_confirmation 但本字段为 null。
+   */
+  pendingConfirmation: PendingConfirmationSchema.nullable(),
 });
 
-/** POST /tasks/:taskId/cancel（E.8）：请求取消运行中任务 */
+/** POST /tasks/:taskId/cancel（E.8）：请求取消运行中 / 待确认任务 */
 export const CancelTaskResponseSchema = z.object({
   taskId: z.string(),
-  /** true = 已向运行中任务发出 abort；false = 当时没有可取消的运行态 */
+  /** true = 已向运行中任务发出 abort，或已把孤儿 awaiting 标为 cancelled */
   cancelled: z.boolean(),
   /** 发出请求时的任务状态（最终 cancelled 需再 GET /tasks/:id） */
+  status: TaskStatusSchema,
+});
+
+/**
+ * POST /tasks/:taskId/confirm（E.10）
+ * 例：`{"decision":"approve"}` → 唤醒 write_file 门控；`reject` → 不写盘
+ */
+export const ConfirmTaskRequestSchema = z
+  .object({
+    decision: z.enum(["approve", "reject"]),
+  })
+  .strict();
+
+export const ConfirmTaskResponseSchema = z.object({
+  taskId: z.string(),
+  /** false：status 不是 awaiting，或（不应出现）resolve 失败走了另一分支 */
+  accepted: z.boolean(),
+  /** accepted=false 时为 null；否则回显请求里的 approve/reject */
+  decision: z.enum(["approve", "reject"]).nullable(),
+  /** 发请求时读到的状态；批准后会变 running，须再 GET 看终态 */
   status: TaskStatusSchema,
 });
 

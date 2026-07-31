@@ -209,7 +209,8 @@ GET /tasks/:taskId
     "llmCalls": [
       { "purpose": "plan", "model": "hy3-preview", "promptTokens": 500, "completionTokens": 40, "totalTokens": 540, "durationMs": 900 }
     ]
-  }
+  },
+  "pendingConfirmation": null
 }
 ```
 
@@ -217,19 +218,63 @@ GET /tasks/:taskId
 
 `metrics` 为 **任务级观测**（表 `task_metrics`）：总耗时、LLM token、估算成本；与 `plannerTrace` / 未来 `traceId` 分开。旧任务可能为 `null`。
 
+`pendingConfirmation`（E.10）：当 `task.status === "awaiting_confirmation"` 且本进程仍有 waiter 时，为 `{ step, toolName, toolInput }`；否则 `null`（含进程重启后的孤儿挂起）。
+
 | 字段 | 含义 |
 |------|------|
 | `plannerTrace` | 模型每一步要不要工具、选哪个、耗时、outcome（来自 `planner_steps` 表） |
 | `toolCalls` | 工具实际执行记录（来自 `tool_calls` 表） |
 | `metrics` | 任务耗时 / token / 估算成本（来自 `task_metrics` 表） |
+| `pendingConfirmation` | 当前待人工确认的工具（进程内 Registry，非 DB 列） |
 
 `plannerTrace` 主要字段：`step`、`needsTool`、`toolName`、耗时（`durationMs`）、错误（`errorCode` / `errorMessage`）、结果类型（`outcome`）。
 
-`outcome` 取值：`direct_answer` | `tool_executed` | `tool_failed` | `budget_exceeded` | `duplicate_skipped` | `fallback_answer`。
+`outcome` 取值：`direct_answer` | `tool_executed` | `tool_failed` | `budget_exceeded` | `duplicate_skipped` | `fallback_answer` | **`human_rejected`**（E.10：人拒绝执行危险工具）。
 
 这个接口主要给前端调试面板和任务回放详情使用。
 
-`task.status` 取值：`pending` | `running` | `succeeded` | `failed` | **`cancelled`**（E.8：用户取消或超时中止，不是工具业务失败）。
+`task.status` 取值：`pending` | `running` | **`awaiting_confirmation`**（E.10：危险工具等人批准）| `succeeded` | `failed` | **`cancelled`**（E.8：用户取消或超时中止，不是工具业务失败）。
+
+## Confirm Task（E.10）
+
+```http
+POST /tasks/:taskId/confirm
+```
+
+请求：
+
+```json
+{
+  "decision": "approve"
+}
+```
+
+`decision`：`approve` | `reject`。仅当 `status=awaiting_confirmation` 且本进程有 waiter 时 `accepted: true`。
+
+返回：
+
+```json
+{
+  "taskId": "...",
+  "accepted": true,
+  "decision": "approve",
+  "status": "awaiting_confirmation"
+}
+```
+
+| 字段 | 含义 |
+|------|------|
+| `accepted` | 是否成功唤醒挂起的 Promise |
+| `decision` | 回显；未接受时为 `null` |
+| `status` | 发请求时读到的状态；批准后任务会回到 `running` 再结束 |
+
+说明：
+
+- 触发工具：当前仅 `write_file`（`requiresConfirmation: true`）。
+- `approve` → 真正 `execute` → 正常 `tool_start` / `tool_end`。
+- `reject` → 不写盘；`tool_calls` 记 `skipped` + `HUMAN_REJECTED`；任务仍可 `succeeded`（模型解释拒绝）。
+- 进程重启后孤儿：`confirm` 返回 400；可用 `cancel` 把 DB 标 `cancelled`。
+- 手测：`pnpm run smoke:confirm` / `pnpm run smoke:confirm -- --decision=reject`（须先 `dev:server`）。
 
 ## Cancel Task（E.8）
 
@@ -237,7 +282,7 @@ GET /tasks/:taskId
 POST /tasks/:taskId/cancel
 ```
 
-对 **running** 任务发出 `AbortSignal`；Planner 在步进边界退出，最终 `tasks.status=cancelled`、`errorCode=CANCELLED`。
+对 **running** 或 **awaiting_confirmation** 任务发出 `AbortSignal`；Planner 协作退出，最终 `tasks.status=cancelled`、`errorCode=CANCELLED`。孤儿 `awaiting_confirmation`（无进程内 controller）会直接落库 `cancelled`。
 
 返回：
 
@@ -251,7 +296,7 @@ POST /tasks/:taskId/cancel
 
 | 字段 | 含义 |
 |------|------|
-| `cancelled` | `true` = 当时找到运行中 controller 并 abort；`false` = 任务已结束或不在本进程 |
+| `cancelled` | `true` = 已 abort 或已把孤儿 awaiting 标 cancelled；`false` = 任务已结束或不在本进程 |
 | `status` | 发请求时读到的状态；最终以再 `GET /tasks/:id` 为准 |
 
 说明：

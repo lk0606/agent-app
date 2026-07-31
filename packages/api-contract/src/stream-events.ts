@@ -6,6 +6,8 @@ import { AgentResultSchema } from "./schemas.js";
 export const AgentStreamEventTypeSchema = z.enum([
   "thinking",
   "planner_decision",
+  /** E.10：危险工具执行前等人确认；此时尚无 tool_start */
+  "awaiting_confirmation",
   "tool_start",
   "tool_end",
   "token",
@@ -28,6 +30,14 @@ export const AgentStreamPlannerDecisionEventSchema = StreamTaskRefSchema.extend(
   needsTool: z.boolean(),
   toolName: z.string().nullable(),
   toolInput: z.string().nullable(),
+});
+
+/** E.10：挂起等人；批准后才发 tool_start */
+export const AgentStreamAwaitingConfirmationEventSchema = StreamTaskRefSchema.extend({
+  type: z.literal("awaiting_confirmation"),
+  step: z.number().int().positive(),
+  toolName: z.string(),
+  toolInput: z.string(),
 });
 
 export const AgentStreamToolStartEventSchema = StreamTaskRefSchema.extend({
@@ -69,6 +79,7 @@ export const AgentStreamErrorEventSchema = z.object({
 export const AgentStreamEventSchema = z.discriminatedUnion("type", [
   AgentStreamThinkingEventSchema,
   AgentStreamPlannerDecisionEventSchema,
+  AgentStreamAwaitingConfirmationEventSchema,
   AgentStreamToolStartEventSchema,
   AgentStreamToolEndEventSchema,
   AgentStreamTokenEventSchema,

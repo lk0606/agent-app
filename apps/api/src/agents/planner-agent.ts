@@ -171,6 +171,30 @@ export class PlannerAgent implements Agent {
         break;
       }
 
+      throwIfAborted(context.signal);
+
+      // E.10：危险工具（如 write_file）先挂起等人；批准后才 tool_start / execute
+      if (tool.requiresConfirmation) {
+        const rejected = await this.awaitHumanConfirmation({
+          context,
+          request,
+          stepNumber,
+          toolName: tool.name,
+          toolInput,
+          stepStartedAt,
+          recordStep,
+          toolCalls,
+          sessionContext,
+          streamedFlag,
+        });
+
+        // 非 null = 人已拒绝并生成了 finalAnswer；跳过 execute，结束本轮循环
+        if (rejected) {
+          finalAnswer = rejected;
+          break;
+        }
+      }
+
       context.logger.info("Tool execution started", {
         step: stepNumber,
         toolName: tool.name,
@@ -347,6 +371,162 @@ export class PlannerAgent implements Agent {
       summary: finalAnswer,
       toolCalls,
     };
+  }
+
+  /**
+   * E.10：requiresConfirmation 工具在 execute 前挂起。
+   * 返回值约定：
+   * - `null` → 人已 approve，调用方继续 tool_start / execute
+   * - `string` → 人已 reject，该字符串是最终回答，调用方应 break（勿再 execute）
+   *
+   * 本方法内链路：[1] 发 SSE/落 awaiting → [2] wait → [3a] approve 返回 null / [3b] reject 回流
+   */
+  private async awaitHumanConfirmation(input: {
+    context: AgentContext;
+    request: AgentRequest;
+    stepNumber: number;
+    toolName: string;
+    toolInput: string;
+    stepStartedAt: number;
+    recordStep: (input: Omit<RecordPlannerStepInput, "taskId" | "step" | "createdAt">) => Promise<void>;
+    toolCalls: AgentResponse["toolCalls"];
+    sessionContext: { sessionSummary: string | null; recentHistory: LlmConversationMessage[] };
+    streamedFlag: { value: boolean };
+  }): Promise<string | null> {
+    const {
+      context,
+      request,
+      stepNumber,
+      toolName,
+      toolInput,
+      stepStartedAt,
+      recordStep,
+      toolCalls,
+      sessionContext,
+      streamedFlag,
+    } = input;
+
+    // create-agent-runtime 必须注入 confirmations；缺了说明装配错误，不是业务失败
+    if (!context.confirmations) {
+      throw new AppError(
+        "INTERNAL_ERROR",
+        `Tool "${toolName}" requires confirmation but ConfirmationRegistry was not injected.`,
+      );
+    }
+
+    context.logger.info("Awaiting human confirmation", {
+      step: stepNumber,
+      toolName,
+      toolInputPreview: toolInput.slice(0, 240),
+      autoApprove: Boolean(context.confirmationAutoApprove),
+    });
+
+    // [1] 手测窗口：此时尚无 tool_start；客户端据此 POST confirm
+    context.emitStream?.({
+      type: "awaiting_confirmation",
+      taskId: request.taskId,
+      step: stepNumber,
+      toolName,
+      toolInput,
+    });
+
+    // autoApprove 时跳过 DB 闪烁 awaiting（evals 瞬间通过，避免观测到中间态）
+    if (!context.confirmationAutoApprove) {
+      await context.memory.updateTask(request.taskId, {
+        status: "awaiting_confirmation",
+      });
+    }
+
+    // [2] 挂起；cancel/超时经 signal abort 会在此抛 CANCELLED
+    const decision = await context.confirmations.wait(
+      request.taskId,
+      { step: stepNumber, toolName, toolInput },
+      {
+        signal: context.signal,
+        autoApprove: context.confirmationAutoApprove,
+      },
+    );
+
+    throwIfAborted(context.signal);
+
+    // [3a] 批准 → 回到 running，返回 null，外层才 emit tool_start / execute
+    if (decision === "approve") {
+      await context.memory.updateTask(request.taskId, {
+        status: "running",
+      });
+      context.logger.info("Human approved tool execution", { step: stepNumber, toolName });
+      return null;
+    }
+
+    // [3b] 拒绝 → 不写盘；合成 tool 输出回流 LLM；任务最终仍可 succeeded
+    // 例：tool_calls.status=skipped, errorCode=HUMAN_REJECTED；plannerTrace.outcome=human_rejected
+    const rejectionOutput =
+      "HUMAN_REJECTED: The user rejected this tool execution. Do not claim the write succeeded.";
+    const startedAt = new Date().toISOString();
+    const finishedAt = new Date().toISOString();
+
+    context.logger.info("Human rejected tool execution", { step: stepNumber, toolName });
+
+    await context.memory.append(request.taskId, {
+      role: "tool",
+      content: `[${toolName}] ${rejectionOutput}`,
+      timestamp: finishedAt,
+    });
+
+    await context.memory.recordToolCall({
+      taskId: request.taskId,
+      step: stepNumber,
+      toolName,
+      toolInput,
+      toolOutput: rejectionOutput,
+      status: "skipped",
+      errorCode: "HUMAN_REJECTED",
+      errorMessage: "User rejected the tool execution.",
+      createdAt: startedAt,
+      finishedAt,
+    });
+
+    toolCalls.push({
+      toolName,
+      input: toolInput,
+      output: rejectionOutput,
+    });
+
+    // SSE tool_end 用 failed 表示「未执行成功」；DB 用 skipped 区分业务失败
+    context.emitStream?.({
+      type: "tool_end",
+      taskId: request.taskId,
+      step: stepNumber,
+      toolName,
+      status: "failed",
+      errorCode: "HUMAN_REJECTED",
+      errorMessage: "User rejected the tool execution.",
+      toolOutput: rejectionOutput,
+    });
+
+    await recordStep({
+      needsTool: true,
+      toolName,
+      toolInput,
+      outcome: "human_rejected",
+      errorCode: "HUMAN_REJECTED",
+      errorMessage: "User rejected the tool execution.",
+      durationMs: Date.now() - stepStartedAt,
+      finishedAt,
+    });
+
+    // 回答阶段仍算 running，避免 GET 一直停在 awaiting_confirmation
+    await context.memory.updateTask(request.taskId, {
+      status: "running",
+    });
+
+    return this.answerFromToolResult(
+      context,
+      request,
+      sessionContext,
+      { toolName, input: toolInput, output: rejectionOutput },
+      streamedFlag,
+    );
   }
 
   private async answerFromToolResult(

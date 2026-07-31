@@ -2,8 +2,17 @@
  * 持久化领域模型（TS 类型，非 DB schema 文件）。
  * 表结构见 apps/api/infra/postgres/migrations/；API JSON 字段用 camelCase，DB 列用 snake_case。
  */
-/** cancelled = 主动取消或超时中止（E.8），不是工具执行失败 */
-export type TaskStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
+/**
+ * cancelled = 主动取消或超时中止（E.8）
+ * awaiting_confirmation = 危险工具执行前等人批准（E.10）；与 running 不同：HTTP 可观测挂起
+ */
+export type TaskStatus =
+  | "pending"
+  | "running"
+  | "awaiting_confirmation"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
 
 export type ToolCallStatus = "succeeded" | "failed" | "skipped";
 
@@ -14,7 +23,9 @@ export type PlannerStepOutcome =
   | "tool_failed"
   | "budget_exceeded"
   | "duplicate_skipped"
-  | "fallback_answer";
+  | "fallback_answer"
+  /** E.10：人拒绝执行需确认的工具（未真正 execute） */
+  | "human_rejected";
 
 export type SessionStatus = "active" | "archived";
 

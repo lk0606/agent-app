@@ -24,6 +24,7 @@
 | [embedding-cosine-notes.md](./embedding-cosine-notes.md) | E.7-B：Embedding + 余弦相似度（入参出参 / 分子分母野路子理解） |
 | [task-cancel-timeout-notes.md](./task-cancel-timeout-notes.md) | E.8：AbortSignal 取消 / 超时；cancelled vs failed |
 | **[task-metrics-notes.md](./task-metrics-notes.md)** | **E.9：metrics / plannerTrace / traceId；估费野路子（优先读）** |
+| [human-confirm-notes.md](./human-confirm-notes.md) | E.10：人工确认 / Promise 挂起原理 / write_file / confirm API |
 | [tool-execution-chain.md](./tool-execution-chain.md) | Tool 运行与调用链路；`plan` vs `execute`；读码与调试 |
 
 ## 建议阅读顺序

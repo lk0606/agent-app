@@ -4,3 +4,4 @@ apps/api/dist
 .env
 .pnpm-store
 apps/api/evals/reports/*
+*.DS_Store

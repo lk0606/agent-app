@@ -11,6 +11,7 @@ import { TokenHubEmbeddingClient } from "../llm/embedding-client.js";
 import { PostgresMemoryStore } from "../memory/postgres-memory-store.js";
 import { PostgresDocumentChunkStore } from "../rag/document-chunk-store.js";
 import { RunningTaskRegistry } from "../runtime/running-task-registry.js";
+import { ConfirmationRegistry } from "../runtime/confirmation-registry.js";
 import { TaskRunner } from "../runtime/task-runner.js";
 import { createLogger } from "../shared/logger.js";
 import { EchoTool } from "../tools/echo-tool.js";
@@ -20,6 +21,7 @@ import { ReadFileTool } from "../tools/read-file-tool.js";
 import { SearchDocsTool } from "../tools/search-docs-tool.js";
 import { TimeTool } from "../tools/time-tool.js";
 import { WaitTool } from "../tools/wait-tool.js";
+import { WriteFileTool } from "../tools/write-file-tool.js";
 
 export function createAgentRuntime(config: AppConfig) {
   const logger = createLogger(config.appName);
@@ -81,6 +83,14 @@ export function createAgentRuntime(config: AppConfig) {
     new WaitTool({
       maxSeconds: config.waitToolMaxSeconds,
     }),
+    // E.10：沙箱写文件；requiresConfirmation=true → Planner 在 execute 前挂起等人批准
+    // 与 read_file 共用 rootDir / 扩展名 / denylist；注册后须重启 dev:server
+    new WriteFileTool({
+      rootDir: config.readFileRootDir,
+      maxBytes: config.readFileMaxBytes,
+      allowedExtensions: config.readFileAllowedExtensions,
+      deniedBasenames: config.readFileDeniedBasenames,
+    }),
   ];
   const agent = new PlannerAgent({
     maxSteps: config.agentMaxSteps,
@@ -90,6 +100,9 @@ export function createAgentRuntime(config: AppConfig) {
   });
   // E.8：进程内登记运行中任务的 AbortController，供 POST /tasks/:id/cancel
   const runningTasks = new RunningTaskRegistry();
+  // E.10：进程内登记 awaiting_confirmation 的 Promise，供 POST /tasks/:id/confirm
+  // 与 runningTasks 成对：cancel abort signal 会唤醒 wait；confirm 调 resolve
+  const confirmations = new ConfirmationRegistry();
   const runner = new TaskRunner({
     agent,
     tools,
@@ -97,6 +110,9 @@ export function createAgentRuntime(config: AppConfig) {
     llm,
     logger,
     runningTasks,
+    confirmations,
+    // 默认 false（手测）；evals:run 在脚本里强制 env=1 后再 loadConfig
+    confirmationAutoApprove: config.confirmationAutoApprove,
     defaultTimeoutMs: config.agentTaskTimeoutMs,
     // E.9：估算成本单价注入 TaskMetricsCollector
     metricsPricing: {
@@ -110,6 +126,7 @@ export function createAgentRuntime(config: AppConfig) {
     memory,
     runner,
     runningTasks,
+    confirmations,
     pool,
   };
 }

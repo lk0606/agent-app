@@ -12,6 +12,10 @@
  */
 import "dotenv/config";
 
+// E.10：eval 直连 TaskRunner，无 HTTP confirm 方。
+// 必须强制 "1"（覆盖 .env 里的 false），否则一旦模型选 write_file 会永久挂死。
+process.env.CONFIRMATION_AUTO_APPROVE = "1";
+
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";

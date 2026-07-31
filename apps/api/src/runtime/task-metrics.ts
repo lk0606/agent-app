@@ -1,14 +1,15 @@
 /**
  * E.9：任务级观测聚合器（进程内）。
  *
- * 在链路里的位置：
- *   HunyuanLlmClient（抽 usage）
- *     → onLlmCall → TaskMetricsCollector.recordLlmCall
- *     → TaskRunner.persistMetrics → finalize → task_metrics 表
- *     → GET /tasks/:id 的 metrics 字段
+ * 常规执行顺序（跨模块）：
+ * 1. HunyuanLlmClient 抽 usage → onLlmCall → recordLlmCall
+ * 2. TaskRunner 结束（成功/失败/取消）→ persistMetrics → finalize → task_metrics 表
+ * 3. GET /tasks/:id 读出 metrics 字段
+ * 关联主键是 taskId；≠ plannerTrace、≠ OpenTelemetry traceId。
+ * 旁路：usage 缺失时 token 记 0、估费可为 null；save 失败由 TaskRunner 吞掉不改 task status
  *
- * 关联主键是 taskId。
- * 与 plannerTrace（决策链）、OpenTelemetry traceId（跨服务链路）都不是同一概念。
+ * 本文件执行链路：见下方方法上的 [1]…[3]
+ *   [1] constructor → [2] recordLlmCall（可多次）→ [3] finalize
  *
  * Token 从哪来：混元响应里的 usage（prompt_tokens / completion_tokens），
  * **不是**按字符数 string.length 自己算。
@@ -68,18 +69,19 @@ export class TaskMetricsCollector {
   private readonly startedAt = Date.now();
   private readonly llmCalls: LlmCallMetrics[] = [];
 
+  /** [1] TaskRunner.run 开头创建；pricing 来自 env 单价 */
   constructor(
     private readonly taskId: string,
     private readonly pricing: TaskMetricsPricing,
   ) {}
 
-  /** 每次 plan / answer / summarize HTTP 结束时由 onLlmCall 调用 */
+  /** [2] 每次 plan / answer / summarize HTTP 结束时由 onLlmCall 调用（可多次） */
   recordLlmCall(call: LlmCallMetrics): void {
     this.llmCalls.push(call);
   }
 
   /**
-   * 任务结束（成功 / 失败 / 取消）时汇总成一行 task_metrics。
+   * [3] 任务结束（成功 / 失败 / 取消）时汇总成一行 task_metrics。
    *
    * toolCallCount / plannerStepCount 由 TaskRunner 从 DB 列表 .length 传入：
    * Collector 自己只攒 LLM 调用，不维护工具/规划步数，避免与落库真相分叉。

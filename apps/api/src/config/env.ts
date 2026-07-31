@@ -50,6 +50,11 @@ export interface AppConfig {
    */
   llmPricePromptPer1MUsd: number;
   llmPriceCompletionPer1MUsd: number;
+  /**
+   * E.10：危险工具跳过人工挂起、立刻 approve。
+   * HTTP server 默认 false；evals:run 脚本会强制 true，避免挂死。
+   */
+  confirmationAutoApprove: boolean;
   port: number;
 }
 
@@ -106,6 +111,8 @@ export function loadConfig(): AppConfig {
     // E.9：占位单价；改 env 即可对照「贵在 prompt 还是 completion」
     llmPricePromptPer1MUsd: readNonNegativeNumber("LLM_PRICE_PROMPT_PER_1M_USD", 0.5),
     llmPriceCompletionPer1MUsd: readNonNegativeNumber("LLM_PRICE_COMPLETION_PER_1M_USD", 1.5),
+    // E.10：仅显式开启时自动批准；dev:server 手测确认须保持 false
+    confirmationAutoApprove: readBoolean("CONFIRMATION_AUTO_APPROVE", false),
     port: readNumber("PORT", 3000),
   };
 }
@@ -175,4 +182,26 @@ function readSearchDocsMode(value: string | undefined): AppConfig["searchDocsMod
   }
 
   return "keyword";
+}
+
+function readBoolean(name: string, fallback: boolean): boolean {
+  const value = process.env[name];
+
+  // 未设 / 空串 → 默认；CONFIRMATION_AUTO_APPROVE 手测须保持 false（空）
+  if (value === undefined || value.trim() === "") {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  // 接受 1/true/yes 与 0/false/no；其它脏值回退默认，避免拼写错误静默变 true
+  if (normalized === "1" || normalized === "true" || normalized === "yes") {
+    return true;
+  }
+
+  if (normalized === "0" || normalized === "false" || normalized === "no") {
+    return false;
+  }
+
+  return fallback;
 }

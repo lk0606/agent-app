@@ -8,5 +8,10 @@ export interface ToolInput {
 export interface Tool {
   name: string;
   description: string;
+  /**
+   * E.10：true 时 Planner 在 execute 前挂起（status=awaiting_confirmation），
+   * 等 POST /tasks/:id/confirm 批准后再真正执行。
+   */
+  requiresConfirmation?: boolean;
   execute(input: ToolInput): Promise<string>;
 }

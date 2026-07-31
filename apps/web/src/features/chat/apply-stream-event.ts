@@ -26,6 +26,17 @@ export function applyStreamEvent(steps: RunStep[], event: AgentStreamEvent): Run
         toolName: event.toolName,
         toolInput: event.toolInput,
       });
+    case "awaiting_confirmation":
+      // E.10：后端已挂起、尚未 execute；本阶段无确认按钮。
+      // 先占位成 running 工具卡（与后续 tool_start 同 id `tool-${step}`，approve 后会被覆盖/衔接）
+      return upsertStep(steps, {
+        id: `tool-${event.step}`,
+        kind: "tool",
+        step: event.step,
+        toolName: event.toolName,
+        toolInput: event.toolInput,
+        status: "running",
+      });
     case "tool_start":
       return upsertStep(steps, {
         id: `tool-${event.step}`,

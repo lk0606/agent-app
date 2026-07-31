@@ -4,14 +4,18 @@
  * 请求大致分四类：
  * 1. Agent 执行：POST /agent/run（一次性 JSON）、POST /agent/stream（SSE 推送进度）
  * 2. Session 查询：GET /sessions、GET /sessions/:id、GET .../messages、PATCH .../archive
- * 3. Task 观测与控制：GET /tasks/:id；POST /tasks/:id/cancel（E.8）
+ * 3. Task 观测与控制：GET /tasks/:id；POST /tasks/:id/cancel（E.8）；POST /tasks/:id/confirm（E.10）
  * 4. 健康检查：GET /health
  *
  * 编排链：本文件 → prepareAgentRun → TaskRunner → PlannerAgent → LlmClient / Tools → MemoryStore(Postgres)
  */
 import "dotenv/config";
 
-import { ListSessionsQuerySchema, RunAgentRequestSchema } from "@agent-app/api-contract";
+import {
+  ConfirmTaskRequestSchema,
+  ListSessionsQuerySchema,
+  RunAgentRequestSchema,
+} from "@agent-app/api-contract";
 import type { AgentStreamEvent } from "@agent-app/api-contract";
 import { createServer } from "node:http";
 
@@ -26,7 +30,7 @@ import { AppError, classifyError } from "./shared/app-error.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  const { runner, logger, memory, pool, runningTasks } = createAgentRuntime(config);
+  const { runner, logger, memory, pool, runningTasks, confirmations } = createAgentRuntime(config);
 
   const server = createServer(async (req, res) => {
     try {
@@ -172,7 +176,7 @@ async function main(): Promise<void> {
         return;
       }
 
-      // --- Task 详情：对话、工具、规划决策链、E.9 成本/耗时聚合 ---
+      // --- Task 详情：对话、工具、规划决策链、E.9 成本/耗时、E.10 待确认载荷 ---
       if (req.method === "GET" && pathSegments[0] === "tasks" && pathSegments.length === 2) {
         const taskId = pathSegments[1];
         const [task, messages, toolCalls, plannerTrace, metrics] = await Promise.all([
@@ -189,11 +193,68 @@ async function main(): Promise<void> {
           throw new AppError("NOT_FOUND", `Task "${taskId}" was not found.`);
         }
 
-        writeJson(res, HTTP_STATUS.ok, { task, messages, toolCalls, plannerTrace, metrics });
+        // E.10：pendingConfirmation 来自进程内 Registry，不是 DB 列
+        // 例：挂起中 → { step, toolName, toolInput }；已结束 / 孤儿 → null（即便 status 仍可能是 awaiting）
+        writeJson(res, HTTP_STATUS.ok, {
+          task,
+          messages,
+          toolCalls,
+          plannerTrace,
+          metrics,
+          pendingConfirmation: confirmations.getPending(taskId),
+        });
         return;
       }
 
-      // --- E.8：取消运行中任务（abort → Planner 协作退出 → status=cancelled）---
+      // --- E.10：批准/拒绝待确认工具（仅 awaiting_confirmation 且本进程有 waiter）---
+      if (
+        req.method === "POST" &&
+        pathSegments[0] === "tasks" &&
+        pathSegments[2] === "confirm" &&
+        pathSegments.length === 3
+      ) {
+        const taskId = pathSegments[1]!;
+        const body = await readJsonBody(req);
+        const { decision } = parseSchema(ConfirmTaskRequestSchema, body, "Request body");
+        const task = await memory.getTask(taskId);
+
+        if (!task) {
+          throw new AppError("NOT_FOUND", `Task "${taskId}" was not found.`);
+        }
+
+        // 已 ended / 还在 running（未到门控）→ 软失败，不抛 4xx，便于客户端轮询
+        // 例：对 succeeded 的 task confirm → accepted:false
+        if (task.status !== "awaiting_confirmation") {
+          writeJson(res, HTTP_STATUS.ok, {
+            taskId,
+            accepted: false,
+            decision: null,
+            status: task.status,
+          });
+          return;
+        }
+
+        const accepted = confirmations.resolve(taskId, decision);
+
+        if (!accepted) {
+          // 孤儿：DB 仍是 awaiting_confirmation，但进程重启后无 waiter → 硬错误，提示 cancel
+          throw new AppError(
+            "BAD_REQUEST",
+            `Task "${taskId}" is awaiting_confirmation but has no in-process waiter (server may have restarted). Cancel it or re-run.`,
+          );
+        }
+
+        // accepted:true 只表示 Promise 已唤醒；最终 status 仍须再 GET（approve 后会先变 running）
+        writeJson(res, HTTP_STATUS.ok, {
+          taskId,
+          accepted: true,
+          decision,
+          status: task.status,
+        });
+        return;
+      }
+
+      // --- E.8 / E.10：取消 running 或 awaiting_confirmation 任务 ---
       if (
         req.method === "POST" &&
         pathSegments[0] === "tasks" &&
@@ -207,7 +268,8 @@ async function main(): Promise<void> {
           throw new AppError("NOT_FOUND", `Task "${taskId}" was not found.`);
         }
 
-        if (task.status !== "running") {
+        // 终态不可取消：succeeded / failed / cancelled / pending
+        if (task.status !== "running" && task.status !== "awaiting_confirmation") {
           writeJson(res, HTTP_STATUS.ok, {
             taskId,
             cancelled: false,
@@ -216,14 +278,41 @@ async function main(): Promise<void> {
           return;
         }
 
-        const aborted = runningTasks.abort(
-          taskId,
-          new AppError("CANCELLED", `Task "${taskId}" was cancelled by client.`),
-        );
+        const abortReason = new AppError("CANCELLED", `Task "${taskId}" was cancelled by client.`);
+        const aborted = runningTasks.abort(taskId, abortReason);
 
+        // 本进程仍有 AbortController（含挂在 confirmation wait 上的 signal）→ abort 即可，TaskRunner catch 落库
+        if (aborted) {
+          writeJson(res, HTTP_STATUS.ok, {
+            taskId,
+            cancelled: true,
+            status: task.status,
+          });
+          return;
+        }
+
+        // 孤儿 awaiting_confirmation（重启后无 AbortController）：没有人会 catch，必须直接写 DB
+        if (task.status === "awaiting_confirmation") {
+          await memory.updateTask(taskId, {
+            status: "cancelled",
+            errorCode: "CANCELLED",
+            errorMessage: abortReason.message,
+            finishedAt: new Date().toISOString(),
+          });
+          confirmations.clear(taskId);
+
+          writeJson(res, HTTP_STATUS.ok, {
+            taskId,
+            cancelled: true,
+            status: "awaiting_confirmation",
+          });
+          return;
+        }
+
+        // running 但本进程无 controller（极少见，多实例/错进程）→ 无法 abort
         writeJson(res, HTTP_STATUS.ok, {
           taskId,
-          cancelled: aborted,
+          cancelled: false,
           status: task.status,
         });
         return;
