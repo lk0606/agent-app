@@ -130,30 +130,38 @@ keyword 那条不会进 2/3；只有 `SEARCH_DOCS_MODE=vector|hybrid` 才会。
 - JSON 顶层改成 `{ "security": [...] }` 嵌套 — 与现有「数组 + `loadCases`」不兼容，要重写加载逻辑
 - 没有「只跑子集」需求前提前上 `tags` — 只是重复注释
 
-### 当前 20 条用例一览
+### 当前 26 条用例一览
 
 | id | 测什么 |
 |----|--------|
 | `time-query` | 命中 `time` 工具 |
 | `doc-summary` | 命中 `http_fetch` + 关键词 |
 | `direct-answer` | 纯回答、不调工具 |
-| `blocked-private-host` | 拦截 `127.0.0.1` → `BAD_REQUEST` |
+| `blocked-private-host` | 拦截 `127.0.0.1` → `BAD_REQUEST`（须调工具） |
 | `echo-tool-smoke` | 命中 `echo` 工具 |
 | `greet-no-tools` | 简单问候、不调工具 |
-| `blocked-localhost` | 拦截 `localhost` → `BAD_REQUEST` |
+| `blocked-localhost` | 拦截 `localhost` → `BAD_REQUEST`（须调工具） |
 | `session-memory-city` | 多轮 session 记忆（城市） |
 | `read-file-fixture` | 命中 `read_file` + 关键词 |
-| `blocked-read-env-traversal` | 路径穿越 → `BAD_REQUEST` |
-| `blocked-read-absolute-path` | 绝对路径 → `BAD_REQUEST` |
+| `blocked-read-env-traversal` | 路径穿越 → `BAD_REQUEST`（须调工具） |
+| `blocked-read-absolute-path` | 绝对路径 → `BAD_REQUEST`（须调工具） |
 | `session-memory-name` | 3 轮 session 记名 |
 | `session-then-time-tool` | 多轮后仍命中 `time` |
-| `blocked-http-10-network` | 拦截 `10.x` 私网 |
-| `blocked-http-192-network` | 拦截 `192.168.x` 私网 |
-| `blocked-read-hidden-dotenv` | 隐藏文件 `.env` |
-| `blocked-read-bad-extension` | 非白名单扩展名 `.exe` |
+| `blocked-http-10-network` | 拦截 `10.x` 私网（须调工具） |
+| `blocked-http-192-network` | 拦截 `192.168.x` 私网（须调工具） |
+| `blocked-read-hidden-dotenv` | 隐藏文件 `.env`（须调工具） |
+| `blocked-read-bad-extension` | 非白名单扩展名 `.exe`（须调工具） |
 | `read-file-no-secret-leak` | 读 fixture + `forbiddenKeywords` |
 | `list-dir-fixture` | 命中 `list_dir` + 关键词 |
-| `blocked-list-dir-traversal` | `list_dir` 绝对路径 → `BAD_REQUEST` |
+| `blocked-list-dir-traversal` | `list_dir` 绝对路径 → `BAD_REQUEST`（须调工具） |
+| `search-docs-city` | 命中 `search_docs` + Taipei |
+| `search-docs-japan-city` | 命中 `search_docs` + Osaka |
+| `search-docs-city-zh` | 向量同义检索（仅 vector/hybrid） |
+| `task-timeout-smoke` | 极短超时 → `cancelled` / `TIMEOUT_ERROR` |
+| `blocked-write-absolute-path` | `write_file` 绝对路径 → `BAD_REQUEST`（E.11） |
+| `blocked-write-traversal` | `write_file` 路径穿越 → `BAD_REQUEST`（E.11） |
+
+> keyword 模式通常 `total=25`（跳过 `search-docs-city-zh`）；以 `evals:run` 报告为准。
 
 改坏实验：[`docs/backend-learning/eval-break-lab.md`](backend-learning/eval-break-lab.md)
 

@@ -2,7 +2,7 @@
 
 这是项目的**唯一进度状态源**。做完一项就更新一项，其他文档只保留设计细节，不再各自维护「已完成 / 下一步」。
 
-最后更新：2026-07-30（E.10 人工确认节点：write_file + confirm API）
+最后更新：2026-08-03（E.11 安全 eval 加固：Tool enforce）
 
 ## 30 秒阅读指南
 
@@ -117,7 +117,7 @@ AI / 协作者交付任务时：**聊天里说明 + 源码注释 + 合并前写�
 
 **路线：** 后端优先学习（见【E 节】与 `.cursor/rules/backend-first-learning.mdc`）。前端工作台仅辅助观察后端；日常用 `curl` + `evals:run` + `task:replay` 验证即可。
 
-**当前开发重点：** **E.10 人工确认节点** 已交付（`write_file` + `awaiting_confirmation` + `POST /tasks/:id/confirm`）。可选：加固安全 eval、Multi-Agent，或独立 `/tasks/[taskId]` 页。
+**当前开发重点：** **E.11 安全 eval 加固** 已交付（blocked-* 逼调工具 + `tool_calls` 失败码断言 + write_file 沙箱 case）。可选：Multi-Agent，或独立 `/tasks/[taskId]` 页。
 
 **前端何时再动：**
 
@@ -142,7 +142,7 @@ AI / 协作者交付任务时：**聊天里说明 + 源码注释 + 合并前写�
 
 失败排查：看报告里的 `taskId`，再跑 `pnpm run task:replay -- <taskId>`。
 
-**用例何时拆文件：** 当前单文件 22 条即可；到 **~30 条** 或难维护时按 [`docs/evals-and-replay.md` §用例组织策略](evals-and-replay.md#用例组织策略何时拆文件) 拆成 `smoke-tools` / `security` / `memory` 等，并改 `run-evals.ts` 合并 `cases/*.json`。
+**用例何时拆文件：** 当前单文件 26 条即可；到 **~30 条** 或难维护时按 [`docs/evals-and-replay.md` §用例组织策略](evals-and-replay.md#用例组织策略何时拆文件) 拆成 `smoke-tools` / `security` / `memory` 等，并改 `run-evals.ts` 合并 `cases/*.json`。
 
 ---
 
@@ -901,7 +901,7 @@ curl -s http://localhost:3000/tasks/$TASK_ID | jq '{
 pnpm run evals:run
 jq '{total, passed, failed}' "$(ls -t apps/api/evals/reports/eval-run-*.json | head -1)"
 # 预期：total=22；新增 case：search-docs-city、search-docs-japan-city 通过
-# 注：3 条安全 case 可能因模型口头拒绝而偶发 fail，属 LLM 行为波动
+# 注：安全 case 须打到 Tool enforce（E.11）；口头拒绝会 fail
 ```
 
 - **失败排查：** 报告 `taskId` → `pnpm run task:replay -- <taskId>` → 看 `tool_calls.output` 是否含匹配片段、`plannerTrace.outcome`
@@ -1160,6 +1160,59 @@ pnpm run evals:run
 
 ---
 
+### E.11 安全 eval 加固（Tool enforce）
+
+| | |
+|--|--|
+| **状态** | 已完成 |
+| **目标** | 安全 case 稳定证明「工具被调用且在 Tool 层被 BAD_REQUEST 拦住」，减少模型口头拒绝导致的偶发 fail |
+| **改动范围** | `basic-agent-cases.json`、`run-evals.ts` 断言、`docs/backend-learning/*` 口径 |
+| **学习笔记** | [`docs/backend-learning/eval-break-lab.md`](backend-learning/eval-break-lab.md) |
+
+#### 已交付
+
+| 项 | 说明 |
+|----|------|
+| **用例文案** | 全部 `blocked-*` 改为「务必调用工具、不要口头拒绝」+ 固定非法参数 |
+| **断言** | `expectedTools` + `expectedErrorCode` 时，要求对应 `tool_calls` 有 `failed` 且 `errorCode` 匹配 |
+| **snapshot** | `loadToolCallsFromDb` 带上 `errorCode` |
+| **write 安全** | `blocked-write-absolute-path` / `blocked-write-traversal`（eval 自动批准 HITL 后打到 `execute` 拦截） |
+| **用例数** | 文件 **26** 条；keyword 模式跑 **25** 条（跳过 `search-docs-city-zh`） |
+
+#### 测试方法
+
+```bash
+pnpm run check:all
+pnpm run evals:run
+# 单测安全子集：
+pnpm run evals:run -- --id blocked-read-absolute-path
+pnpm run evals:run -- --id blocked-write-traversal
+```
+
+- 预期：`failed: 0`；安全 case 报告里 `toolCalls[].status=failed` 且 `errorCode=BAD_REQUEST`
+- 若 fail「Expected tool was not used」：模型仍口头拒绝 → 看该 case 的 `plannerTrace`，必要时再强化文案
+- 若 fail「no matching failed tool_calls row」：工具调了但错误码不对 → `task:replay` 看 `tool_calls.error_code`
+
+#### 学习要点
+
+1. **安全 eval 测 Tool enforce，不测「模型是否善良」**：口头拒绝 ≠ 工程拦截。
+2. **task 级 errorCode 不够**：还要看 `tool_calls.status=failed` + `error_code`，证明拦截发生在 `execute()`。
+3. **用例文案是稳定性工程**：`务必调用…路径固定为…` 降低模型改写/拒调概率（与 `list_dir` `/etc` 同套路）。
+4. **write_file 安全与 HITL 正交**：eval 自动批准后仍须路径沙箱；确认只挡「意图执行」，不替代路径校验。
+
+#### 代码怎么读
+
+| 顺序 | 文件 | 看什么 |
+|------|------|--------|
+| 1 | `apps/api/evals/cases/basic-agent-cases.json` | `blocked-*` / `blocked-write-*` 文案与断言字段 |
+| 2 | `apps/api/src/scripts/run-evals.ts` | `evaluateCase` 里 Tool enforce 额外断言 |
+| 3 | `apps/api/src/tools/read-file-tool.ts` / `write-file-tool.ts` | `resolveSafePath` 抛 `BAD_REQUEST` |
+| 4 | `apps/api/src/agents/planner-agent.ts` | 工具失败落库 `tool_calls` 后向上抛 |
+
+心智模型：`危险 input → 必须调工具 → execute 抛 BAD_REQUEST → task failed + tool_calls.failed → eval 绿`。
+
+---
+
 ### E.5 执行顺序小结（历史 P0–P4）
 
 ```text
@@ -1176,6 +1229,7 @@ P6.5 E.7-B 向量 RAG（embedding）       ← 已完成
 P7   E.8 任务取消 + 超时                 ← 已完成
 P8   E.9 任务观测与成本统计（metrics）   ← 已完成
 P9   E.10 人工确认节点（HITL）           ← 已完成
+P10  E.11 安全 eval 加固（Tool enforce） ← 已完成
 ```
 
 前端 Step 2/4 **不阻塞** E.1–E.2、E.4；**E.3 / E.3.5 必须带前端**（E.3.5 为 Step 5 主验收）。

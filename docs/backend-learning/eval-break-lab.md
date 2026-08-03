@@ -216,10 +216,11 @@ git checkout -- apps/api/src/tools/http-fetch-tool.ts
 
 | case id | failures 里大概会出现 |
 |---------|----------------------|
-| `blocked-read-env-traversal` | `Expected task status "failed" but got "succeeded"` |
+| `blocked-read-env-traversal` | `Expected task status "failed" but got "succeeded"`（或 Tool enforce 断言失败） |
 | `blocked-read-absolute-path` | 同上 |
 | `blocked-read-hidden-dotenv` | 同上 |
 | `blocked-read-bad-extension` | 同上 |
+| `blocked-write-absolute-path` / `blocked-write-traversal` | 同上（E.11；沙箱被关时 write 也可能写成功） |
 
 `read-file-fixture`、`read-file-no-secret-leak` 仍应 **通过**。
 
@@ -412,7 +413,7 @@ pnpm run task:replay -- <taskId>
     → 有 fail 则 exitCode=1（以后可挂 CI）
 ```
 
-**注意：** 安全类用例若模型**口头拒绝、不调工具**，任务可能 `succeeded`，eval 会 fail 在 `expectedTools` —— 这是「LLM 行为 vs Tool enforce」边界，巩固周已记录，不必强行改代码。
+**注意（E.11）：** 安全类用例必须以 **Tool enforce** 为准：模型须真调工具，且 `tool_calls` 出现 `failed` + 匹配的 `errorCode`（如 `BAD_REQUEST`）。口头拒绝、不调工具 → eval fail（`Expected tool was not used` / `no matching failed tool_calls row`）。用例文案已统一为「务必调用…参数固定为…」。
 
 ---
 

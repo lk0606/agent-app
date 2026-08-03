@@ -247,7 +247,7 @@ Tool **内部业务逻辑**（索引、沙箱、打分）在 `tools/search-docs-
 | `toolCalls` | 工具真实执行记录 | planner 的「打算调」 |
 | `previousToolCalls` | 本轮任务内已执行结果，喂回 `llm.plan` | 历史 session 的 tool_calls |
 
-**安全 case 常见现象：** 模型口头拒绝、未调工具 → `plannerTrace` 可能是 `direct_answer`，`tool_calls` 为空，task 仍 `succeeded`。这是 **LLM 行为**，不是 Tool 层 enforce。Tool 层 enforce 见 `read_file` / `http_fetch` 抛 `BAD_REQUEST`。
+**安全 case（E.11）：** 必须真调工具并打到 Tool enforce。模型口头拒绝、未调工具 → eval fail。Tool 层 enforce 见 `read_file` / `http_fetch` / `write_file` 抛 `BAD_REQUEST`；断言看 `tool_calls.status=failed` + `error_code`。
 
 ---
 
@@ -344,7 +344,7 @@ curl -s http://localhost:3000/tasks/$TASK_ID | jq '{
 |------|------|--------|
 | 改了 Tool 代码 curl 没变化 | 旧进程未重启 | 重启 `dev:server` 或 F5 Debug |
 | 模型说「没有 list_dir」 | 旧进程 / prompt 未更新 | 重启；查 `create-agent-runtime` 是否注册 |
-| eval 安全 case 偶发 fail | 模型口头拒绝，未调工具 | 属 LLM 行为 vs Tool enforce 差异，见 `agent-core-flow.md` |
+| eval 安全 case fail | 模型口头拒绝，未调工具 | E.11 预期 fail；强化「务必调用」文案或看 `plannerTrace` |
 | `plannerTrace` 有工具名但 `toolCalls` 为空 | 看了错误的 taskId，或 plan 后未执行就 direct_answer | `task:replay` 对照完整时间线 |
 | 以为 LLM 直接执行了 read_file | function calling 只返回「要调什么」 | 执行永远在 `PlannerAgent` 的 `tool.execute()` |
 

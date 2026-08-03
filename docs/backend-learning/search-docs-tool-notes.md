@@ -301,7 +301,7 @@ jq '{total, passed, failed, newCases: [.results[] | select(.id | startswith("sea
 | `search-docs-city` | `expectedTools: ["search_docs"]`；关键词 `Taipei` |
 | `search-docs-japan-city` | 同上；关键词 `Osaka` |
 
-全量 `total=22`。安全类 case（`blocked-read-*` 等）可能因模型口头拒绝而偶发 fail，见 `agent-core-flow.md`。
+全量 keyword `total=25`（含 E.11 `blocked-write-*`；跳过 `search-docs-city-zh`）。安全类 case 须打到 Tool enforce，见 `agent-core-flow.md` / E.11。
 
 ### 失败排查
 

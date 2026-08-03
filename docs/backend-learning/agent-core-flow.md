@@ -416,7 +416,7 @@ LLM 行为层：prompt 引导「不要抓内网」→ 模型可能口头拒绝�
 Tool  enforce 层：即使模型调了，validateUrl / resolveSafePath 仍抛 BAD_REQUEST
 ```
 
-eval 中 `blocked-read-*` case 可能出现 **task succeeded 但模型未调工具** — 这是 LLM 行为 vs Tool enforce 的差异，巩固周观察即可。
+**E.11：** `blocked-*` eval 要求模型**必须调工具**并打到 Tool 层；口头拒绝不算过。断言同时看 `expectedTools` + `tool_calls.failed` + `errorCode`。
 
 ### 工具执行在 plan 中的位置（F 阶段）
 
