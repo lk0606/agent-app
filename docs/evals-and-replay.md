@@ -66,6 +66,7 @@ keyword 那条不会进 2/3；只有 `SEARCH_DOCS_MODE=vector|hybrid` 才会。
 - 最终回答里是否**不得**包含关键字（`forbiddenKeywords`）
 - **成功**工具调用次数是否超限（`maxToolCalls`；失败尝试如安全拦截不计入）
 - 任务是否按预期失败（`expectedTaskStatus` + `expectedErrorCode`）
+- **E.12 路由专家**（`expectedRoutedAgent`：`plannerTrace` 须有 `outcome=routed` 且 `toolName` 匹配；配合 `requiresOrchestration: ["supervisor"]`）
 
 ### 用例格式
 

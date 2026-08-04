@@ -2,7 +2,7 @@
 
 这是项目的**唯一进度状态源**。做完一项就更新一项，其他文档只保留设计细节，不再各自维护「已完成 / 下一步」。
 
-最后更新：2026-08-03（E.11 安全 eval 加固：Tool enforce）
+最后更新：2026-08-04（E.12 Multi-Agent：Supervisor + 专家）
 
 ## 30 秒阅读指南
 
@@ -31,6 +31,7 @@
 | 想搞懂 Tool 选型 / execute / 落库 | [`docs/backend-learning/tool-execution-chain.md`](backend-learning/tool-execution-chain.md) |
 | 想搞懂任务用量 / 估费 / 三种追踪差别 | [`docs/backend-learning/task-metrics-notes.md`](backend-learning/task-metrics-notes.md) |
 | 想搞懂人工确认 / write_file 挂起 | [`docs/backend-learning/human-confirm-notes.md`](backend-learning/human-confirm-notes.md) |
+| 想搞懂 Multi-Agent / Supervisor 路由 | [`docs/backend-learning/multi-agent-notes.md`](backend-learning/multi-agent-notes.md) |
 | Agent 运行态 / Cursor 式 SSE 计划 | 本文件 [E.3.5](#e35-agent-运行态完整体验cursor-式) |
 | API / 表 / 字段怎么命名 | 本文件 [【H 节】命名约定](#h-命名约定) |
 | 所有文档分工 | 本文件 [【G 节】文档索引](#g-文档索引) |
@@ -117,7 +118,7 @@ AI / 协作者交付任务时：**聊天里说明 + 源码注释 + 合并前写�
 
 **路线：** 后端优先学习（见【E 节】与 `.cursor/rules/backend-first-learning.mdc`）。前端工作台仅辅助观察后端；日常用 `curl` + `evals:run` + `task:replay` 验证即可。
 
-**当前开发重点：** **E.11 安全 eval 加固** 已交付（blocked-* 逼调工具 + `tool_calls` 失败码断言 + write_file 沙箱 case）。可选：Multi-Agent，或独立 `/tasks/[taskId]` 页。
+**当前开发重点：** **E.12 Multi-Agent** 已交付（Supervisor 路由 + 专家工具子集 + `multi-route-*` eval）。可选：E.12.x handoff，或独立 `/tasks/[taskId]` 页。
 
 **前端何时再动：**
 
@@ -142,7 +143,7 @@ AI / 协作者交付任务时：**聊天里说明 + 源码注释 + 合并前写�
 
 失败排查：看报告里的 `taskId`，再跑 `pnpm run task:replay -- <taskId>`。
 
-**用例何时拆文件：** 当前单文件 26 条即可；到 **~30 条** 或难维护时按 [`docs/evals-and-replay.md` §用例组织策略](evals-and-replay.md#用例组织策略何时拆文件) 拆成 `smoke-tools` / `security` / `memory` 等，并改 `run-evals.ts` 合并 `cases/*.json`。
+**用例何时拆文件：** 当前单文件约 **29** 条；到 **~30 条** 或难维护时按 [`docs/evals-and-replay.md` §用例组织策略](evals-and-replay.md#用例组织策略何时拆文件) 拆成 `smoke-tools` / `security` / `memory` 等，并改 `run-evals.ts` 合并 `cases/*.json`。
 
 ---
 
@@ -1213,6 +1214,69 @@ pnpm run evals:run -- --id blocked-write-traversal
 
 ---
 
+### E.12 Multi-Agent（Supervisor + 专家）
+
+| | |
+|--|--|
+| **状态** | 已完成 |
+| **目标** | 引入 Supervisor 一次路由 + 专家 Planner（工具子集）；路由可观测；补 multi-route eval |
+| **改动范围** | `supervisor-agent.ts`、`routeSpecialty`、`create-agent-runtime`、`stepOffset`、契约 `routed` / metrics `route`、`multi-route-*` cases |
+| **学习笔记** | [`docs/backend-learning/multi-agent-notes.md`](backend-learning/multi-agent-notes.md)（含完整测试与验收） |
+
+#### 已交付
+
+| 项 | 说明 |
+|----|------|
+| **SupervisorAgent** | `routeSpecialty` → `planner_steps` step1 `outcome=routed` → 委托 Planner |
+| **专家子集** | `docs` / `files` / `general`（全量）；不确定应落 `general` |
+| **stepOffset** | 专家从 step 2 起写，避免与 routed 撞号 |
+| **开关** | `AGENT_ORCHESTRATION=supervisor\|single`（默认 supervisor） |
+| **eval** | `multi-route-docs` / `files` / `general` + `expectedRoutedAgent` 断言 |
+| **用例数** | 文件 **29** 条；keyword 模式约 **28** 条（跳过 `search-docs-city-zh`；`single` 时再跳过 3 条 multi-route） |
+
+#### 测试方法
+
+```bash
+pnpm run check:all
+
+# Multi-Agent 主验收（须 supervisor，默认即可）
+pnpm run evals:run -- --id multi-route-docs
+pnpm run evals:run -- --id multi-route-files
+pnpm run evals:run -- --id multi-route-general
+
+# 肉眼看路由（注意 -- 后空格）
+pnpm run task:replay -- <报告里的 taskId>
+
+# 合并前建议全量
+pnpm run evals:run
+```
+
+- **算对：** 三条 multi-route `passed: true`；replay 见 `plannerTrace[0].outcome=routed` 且 `tool_name` 为期望专家；真实工具在 step≥2；`metrics.llmCalls` 含 `purpose=route`
+- **算错：** `Expected routed agent "X" but …` → 分诊偏了；`Expected tool was not used` → 专家对了但没调工具
+- **对照：** `AGENT_ORCHESTRATION=single` 时 multi-route case 应被 skip
+- 细则与 fail 对照表：[`multi-agent-notes.md` §怎么测、怎样算对](backend-learning/multi-agent-notes.md#怎么测怎样算对)
+
+#### 学习要点
+
+1. **多 Agent 实质是决策权拆分**：Supervisor 选人，专家在小工具箱里再 plan——不是只给工具分组。
+2. **`routed` ≠ 工具执行**：分诊只写 `planner_steps`；`tool_calls` 仍是专家真正调的工具。
+3. **route-once 的代价**：误路由本版不热转；靠保守 `general` + 可观测；handoff 留 E.12.x。
+4. **eval 要断言「分到谁」**：`expectedRoutedAgent` 查 `outcome=routed`，不能只断言 `expectedTools`。
+
+#### 代码怎么读
+
+| 顺序 | 文件 | 看什么 |
+|------|------|--------|
+| 1 | `apps/api/src/agents/supervisor-agent.ts` | 路由 → 落库 routed → 委托 |
+| 2 | `apps/api/src/llm/hunyuan-llm-client.ts` | `routeSpecialty` |
+| 3 | `apps/api/src/app/create-agent-runtime.ts` | 专家子集 + 编排开关 |
+| 4 | `apps/api/evals/cases/basic-agent-cases.json` | `multi-route-*` |
+| 5 | `apps/api/src/scripts/run-evals.ts` | `expectedRoutedAgent` |
+
+心智模型：`分诊 → routed 可观测 → 专家小工具箱 plan → multi-route eval 绿`。
+
+---
+
 ### E.5 执行顺序小结（历史 P0–P4）
 
 ```text
@@ -1230,6 +1294,7 @@ P7   E.8 任务取消 + 超时                 ← 已完成
 P8   E.9 任务观测与成本统计（metrics）   ← 已完成
 P9   E.10 人工确认节点（HITL）           ← 已完成
 P10  E.11 安全 eval 加固（Tool enforce） ← 已完成
+P11  E.12 Multi-Agent（Supervisor）      ← 已完成
 ```
 
 前端 Step 2/4 **不阻塞** E.1–E.2、E.4；**E.3 / E.3.5 必须带前端**（E.3.5 为 Step 5 主验收）。
@@ -1315,6 +1380,7 @@ P10  E.11 安全 eval 加固（Tool enforce） ← 已完成
 | **本文件** | 进度与下一步（状态源）；【E 节】交付约定；【H 节】命名约定 |
 | **`docs/backend-learning/agent-core-flow.md`** | **Agent 完整原理手册（HTTP→落库→Session→Eval→安全）** |
 | **`docs/backend-learning/task-metrics-notes.md`** | **E.9：metrics / plannerTrace / traceId；估费野路子** |
+| **`docs/backend-learning/multi-agent-notes.md`** | **E.12：Supervisor / 专家 / 测试与验收** |
 | **`docs/backend-learning/`** | HTTP body / Agent 全链路 / Debug / 400 details 概念笔记 |
 | **`docs/consolidation-week.md`** | **E.5 巩固周完整手册**（Day 1–5 详细任务） |
 | `docs/fullstack-frontend-plan.md` | 前后端技术选型与 Step 设计 |

@@ -13,11 +13,13 @@
  *
  * E.11：安全 case 须打到 Tool enforce（expectedTools + expectedErrorCode），
  * 不能只靠模型口头拒绝；口头拒绝会 fail 在「Expected tool was not used」。
+ * E.12：expectedRoutedAgent 断言 plannerTrace 存在 outcome=routed 且 toolName=专家 id。
  *
  * CLI 示例：
  *   pnpm run evals:run
  *   pnpm run evals:run -- --id blocked-write-traversal
  *   pnpm run evals:run -- --id=search-docs-city-zh
+ *   pnpm run evals:run -- --id multi-route-docs
  *   pnpm run evals:run -- evals/cases/basic-agent-cases.json --id search-docs-city
  *
  * 用例增多、拆多文件时的策略见 docs/evals-and-replay.md §用例组织策略。
@@ -65,6 +67,13 @@ interface EvalCase {
   taskTimeoutMs?: number;
   /** 仅当 SEARCH_DOCS_MODE 为所列值之一时才跑该 case（如向量同义检索） */
   requiresSearchDocsMode?: Array<"keyword" | "vector" | "hybrid">;
+  /**
+   * E.12：断言 Supervisor 路由到该专家（planner_steps.outcome=routed 且 tool_name 匹配）。
+   * 须配合 requiresOrchestration: ["supervisor"]，single 模式下无 routed 步。
+   */
+  expectedRoutedAgent?: "docs" | "files" | "general";
+  /** 仅当 AGENT_ORCHESTRATION 为所列值之一时才跑（如 multi-route-* 仅 supervisor） */
+  requiresOrchestration?: Array<"supervisor" | "single">;
 }
 
 interface EvalToolCallSnapshot {
@@ -156,7 +165,9 @@ async function main(): Promise<void> {
   const casesPath = casesPathArg ?? path.join(apiRoot, "evals/cases/basic-agent-cases.json");
   const reportDir = path.join(apiRoot, "evals/reports");
 
-  let cases = (await loadCases(casesPath)).filter((testCase) => shouldRunEvalCase(testCase, config.searchDocsMode));
+  let cases = (await loadCases(casesPath)).filter((testCase) =>
+    shouldRunEvalCase(testCase, config.searchDocsMode, config.agentOrchestration),
+  );
 
   // --id：只跑指定 case；找不到则直接失败（区分「模式 skip」与「id 写错」）
   if (caseId) {
@@ -210,8 +221,11 @@ async function main(): Promise<void> {
       toolCalls = await loadToolCallsFromDb(memory, assertTaskId);
     }
 
+    // E.12：路由断言读 planner_steps（与 GET /tasks plannerTrace 同源）
+    const plannerSteps = await memory.listTaskPlannerSteps(assertTaskId);
+
     const durationMs = Date.now() - startedAt;
-    const failures = evaluateCase(testCase, summary, toolCalls, taskStatus, errorCode);
+    const failures = evaluateCase(testCase, summary, toolCalls, taskStatus, errorCode, plannerSteps);
 
     results.push({
       id: testCase.id,
@@ -362,6 +376,7 @@ async function loadToolCallsFromDb(
 /**
  * [4] 按 case 字段断言；安全 case 同时要有 expectedTools + expectedErrorCode，
  * 以证明打到了 Tool enforce（而非模型口头拒绝后 task 仍 succeeded）。
+ * E.12：expectedRoutedAgent → plannerTrace 须有 outcome=routed 且 toolName 匹配。
  */
 function evaluateCase(
   testCase: EvalCase,
@@ -369,6 +384,7 @@ function evaluateCase(
   toolCalls: EvalToolCallSnapshot[],
   taskStatus: "succeeded" | "failed" | "cancelled",
   errorCode: string | null,
+  plannerSteps: Array<{ outcome: string; toolName: string | null }>,
 ): string[] {
   const failures: string[] = [];
   const toolNames = toolCalls.map((item) => item.toolName);
@@ -381,6 +397,23 @@ function evaluateCase(
 
   if (testCase.expectedErrorCode && errorCode !== testCase.expectedErrorCode) {
     failures.push(`Expected error code "${testCase.expectedErrorCode}" but got "${errorCode}".`);
+  }
+
+  // E.12：合法例 outcome=routed + toolName=docs；非法例只有 tool_executed 无 routed → fail
+  if (testCase.expectedRoutedAgent) {
+    const routed = plannerSteps.find(
+      (step) => step.outcome === "routed" && step.toolName === testCase.expectedRoutedAgent,
+    );
+
+    if (!routed) {
+      const routedSeen = plannerSteps
+        .filter((step) => step.outcome === "routed")
+        .map((step) => step.toolName ?? "(null)")
+        .join(", ");
+      failures.push(
+        `Expected routed agent "${testCase.expectedRoutedAgent}" but plannerTrace routed toolName(s): ${routedSeen || "(none)"}.`,
+      );
+    }
   }
 
   for (const toolName of testCase.expectedTools ?? []) {
@@ -435,12 +468,25 @@ function evaluateCase(
   return failures;
 }
 
-function shouldRunEvalCase(testCase: EvalCase, searchDocsMode: ReturnType<typeof loadConfig>["searchDocsMode"]): boolean {
-  if (!testCase.requiresSearchDocsMode || testCase.requiresSearchDocsMode.length === 0) {
-    return true;
+function shouldRunEvalCase(
+  testCase: EvalCase,
+  searchDocsMode: ReturnType<typeof loadConfig>["searchDocsMode"],
+  agentOrchestration: ReturnType<typeof loadConfig>["agentOrchestration"],
+): boolean {
+  if (testCase.requiresSearchDocsMode && testCase.requiresSearchDocsMode.length > 0) {
+    if (!testCase.requiresSearchDocsMode.includes(searchDocsMode)) {
+      return false;
+    }
   }
 
-  return testCase.requiresSearchDocsMode.includes(searchDocsMode);
+  // multi-route-* 等依赖 Supervisor 的 case：single 模式下跳过
+  if (testCase.requiresOrchestration && testCase.requiresOrchestration.length > 0) {
+    if (!testCase.requiresOrchestration.includes(agentOrchestration)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 /** vector/hybrid 模式且 document_chunks 为空时自动建索引，避免 search-docs-city-zh 等 case 误 fail */

@@ -229,7 +229,7 @@ GET /tasks/:taskId
 
 `plannerTrace` 主要字段：`step`、`needsTool`、`toolName`、耗时（`durationMs`）、错误（`errorCode` / `errorMessage`）、结果类型（`outcome`）。
 
-`outcome` 取值：`direct_answer` | `tool_executed` | `tool_failed` | `budget_exceeded` | `duplicate_skipped` | `fallback_answer` | **`human_rejected`**（E.10：人拒绝执行危险工具）。
+`outcome` 取值：`direct_answer` | `tool_executed` | `tool_failed` | `budget_exceeded` | `duplicate_skipped` | `fallback_answer` | **`human_rejected`**（E.10：人拒绝执行危险工具）| **`routed`**（E.12：Supervisor 分诊；`toolName` 为专家 id `docs`/`files`/`general`，不是真实工具调用）。
 
 这个接口主要给前端调试面板和任务回放详情使用。
 

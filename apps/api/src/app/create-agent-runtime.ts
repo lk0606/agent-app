@@ -1,8 +1,11 @@
 /**
  * 依赖注入：把 Config、DB、LLM、Tools、Agent、TaskRunner 组装成可运行运行时。
  * HTTP(server.ts) 与脚本(run-evals.ts) 都从这里拿同一套实例，保证行为一致。
+ *
+ * E.12：按 AGENT_ORCHESTRATION 选择 SupervisorAgent 或单 PlannerAgent 注入 TaskRunner。
  */
 import { PlannerAgent } from "../agents/planner-agent.js";
+import { SupervisorAgent } from "../agents/supervisor-agent.js";
 import type { AppConfig } from "../config/env.js";
 import { getDatabaseConfig } from "../db/connection-config.js";
 import { createPgPool } from "../db/pg-client.js";
@@ -92,12 +95,33 @@ export function createAgentRuntime(config: AppConfig) {
       deniedBasenames: config.readFileDeniedBasenames,
     }),
   ];
-  const agent = new PlannerAgent({
+  const planner = new PlannerAgent({
     maxSteps: config.agentMaxSteps,
     toolCallBudget: config.agentToolCallBudget,
     sessionHistoryMessageLimit: config.sessionHistoryMessageLimit,
     sessionHistoryCharBudget: config.sessionHistoryCharBudget,
   });
+
+  // E.12：supervisor = 路由 + 专家工具子集；single = 全量工具直跑 Planner（对比/救急）
+  const agent =
+    config.agentOrchestration === "single"
+      ? planner
+      : new SupervisorAgent({
+          planner,
+          specialists: {
+            // docs：检索向；故意不含 write_file，缩小写盘误调面
+            docs: tools.filter((tool) =>
+              ["search_docs", "read_file", "list_dir"].includes(tool.name),
+            ),
+            // files：沙箱读写；不含 search_docs / http / time
+            files: tools.filter((tool) =>
+              ["list_dir", "read_file", "write_file"].includes(tool.name),
+            ),
+            // general：与现网一致，不确定意图必须落到这里
+            general: tools,
+          },
+        });
+
   // E.8：进程内登记运行中任务的 AbortController，供 POST /tasks/:id/cancel
   const runningTasks = new RunningTaskRegistry();
   // E.10：进程内登记 awaiting_confirmation 的 Promise，供 POST /tasks/:id/confirm

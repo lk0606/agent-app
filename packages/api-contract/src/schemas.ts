@@ -71,6 +71,11 @@ export const PlannerStepOutcomeSchema = z.enum([
   "fallback_answer",
   /** E.10：人工拒绝执行需确认的工具（工具未真正跑；任务仍可 succeeded） */
   "human_rejected",
+  /**
+   * E.12：Supervisor 路由一步（非真实工具）。
+   * toolName 为专家 id：docs | files | general；随后由该专家的 Planner 继续写后续 step。
+   */
+  "routed",
 ]);
 
 export const PlannerStepRecordSchema = z.object({
@@ -153,7 +158,7 @@ export const ArchiveSessionResponseSchema = z.object({
 
 /** E.9：单次 LLM HTTP 调用明细（写入 task_metrics.llm_calls） */
 export const LlmCallMetricsSchema = z.object({
-  purpose: z.enum(["plan", "answer", "summarize"]),
+  purpose: z.enum(["plan", "answer", "summarize", "route"]),
   model: z.string(),
   promptTokens: z.number().int().nonnegative().nullable(),
   completionTokens: z.number().int().nonnegative().nullable(),

@@ -608,13 +608,14 @@ function normalizeLlmCallsJson(value: unknown): TaskMetricsRecord["llmCalls"] {
     const row = item as Record<string, unknown>;
     const purpose = row.purpose;
 
-    if (purpose !== "plan" && purpose !== "answer" && purpose !== "summarize") {
+    // 合法例：purpose=route；非法例：purpose=trace → 丢弃该 llmCalls 行
+    if (typeof purpose !== "string" || !["plan", "answer", "summarize", "route"].includes(purpose)) {
       return [];
     }
 
     return [
       {
-        purpose,
+        purpose: purpose as "plan" | "answer" | "summarize" | "route",
         model: typeof row.model === "string" ? row.model : "unknown",
         promptTokens: typeof row.promptTokens === "number" ? row.promptTokens : null,
         completionTokens: typeof row.completionTokens === "number" ? row.completionTokens : null,

@@ -10,7 +10,7 @@ import OpenAI from "openai";
 import { AppError } from "../shared/app-error.js";
 import { rethrowIfLlmAborted, throwIfAborted } from "../runtime/abort-utils.js";
 import { readLlmTokenUsage, type LlmCallMetrics, type LlmTokenUsage } from "../runtime/task-metrics.js";
-import type { AnswerRequest, LlmClient, LlmStreamOptions, PlanRequest, PlannerDecision, SessionSummaryRequest } from "./llm-client.js";
+import type { AnswerRequest, LlmClient, LlmStreamOptions, PlanRequest, PlannerDecision, RouteSpecialtyRequest, SessionSummaryRequest, SpecialistId } from "./llm-client.js";
 
 export class HunyuanLlmClient implements LlmClient {
   private readonly client: OpenAI;
@@ -236,6 +236,83 @@ export class HunyuanLlmClient implements LlmClient {
       throw new AppError("LLM_ERROR", "Hunyuan session summarization failed.", { cause: stringifyError(error) });
     } finally {
       this.emitLlmCall(input.onLlmCall, "summarize", usage, startedAt);
+    }
+  }
+
+  /**
+   * E.12：Supervisor 分诊。独立 system prompt，避免复用 plan 的「调 time/read_file」规则。
+   * 用 function calling 选专家；未选 / 非法名 → 回退 general（保守，避免锁死错误工具子集）。
+   */
+  async routeSpecialty(input: RouteSpecialtyRequest): Promise<SpecialistId> {
+    const startedAt = Date.now();
+    let usage: LlmTokenUsage | null = null;
+    const allowed = new Set(input.specialists.map((item) => item.id));
+
+    try {
+      const catalog = input.specialists
+        .map((item) => `- ${item.id}: ${item.description}`)
+        .join("\n");
+
+      const completion = await this.client.chat.completions.create(
+        {
+          model: this.options.model,
+          messages: [
+            {
+              role: "system",
+              content: [
+                "You are a router for a multi-agent system. Pick exactly one specialist.",
+                "Do not answer the user. Do not invent specialists outside the provided tools.",
+                "Rules:",
+                "- write / create / save a sandbox file → files",
+                "- search / find across documents without a specific write → docs",
+                "- list or read sandbox paths when clearly file-ops (not doc Q&A) → files",
+                "- current time, HTTP URL fetch, wait/sleep, echo, or unclear → general",
+                "When unsure between docs and files, prefer general.",
+              ].join(" "),
+            },
+            {
+              role: "user",
+              content: [`Specialists:\n${catalog}`, `User request:\n${input.userInput}`].join("\n\n"),
+            },
+          ],
+          tools: input.specialists.map((item) => ({
+            type: "function" as const,
+            function: {
+              name: item.id,
+              description: item.description,
+              parameters: {
+                type: "object",
+                properties: {
+                  input: {
+                    type: "string",
+                    description: "Optional short reason for the route choice.",
+                  },
+                },
+                additionalProperties: false,
+              },
+            },
+          })),
+          // 强制选一个专家 function，减少口头直接答导致落 general 过多
+          tool_choice: "required",
+        },
+        { signal: input.signal },
+      );
+
+      usage = readLlmTokenUsage(completion.usage);
+      const toolCall = completion.choices[0]?.message?.tool_calls?.[0];
+      const name = toolCall?.type === "function" ? toolCall.function.name : null;
+
+      // 合法例：docs / files / general；非法例：time → 回退 general
+      if (name && allowed.has(name as SpecialistId)) {
+        return name as SpecialistId;
+      }
+
+      return "general";
+    } catch (error: unknown) {
+      rethrowIfLlmAborted(error);
+      throw new AppError("LLM_ERROR", "Hunyuan specialty routing failed.", { cause: stringifyError(error) });
+    } finally {
+      this.emitLlmCall(input.onLlmCall, "route", usage, startedAt);
     }
   }
 

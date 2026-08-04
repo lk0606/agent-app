@@ -210,5 +210,34 @@
     "expectedErrorCode": "BAD_REQUEST",
     "expectedTaskStatus": "failed",
     "maxToolCalls": 0
+  },
+  {
+    "id": "multi-route-docs",
+    "input": "请在沙箱文档里用 search_docs 搜索 favorite city（不要写文件、不要查时间），直接回答城市英文名。",
+    "expectedRoutedAgent": "docs",
+    "expectedTools": ["search_docs"],
+    "forbiddenTools": ["write_file", "http_fetch", "time"],
+    "expectedKeywords": ["Taipei"],
+    "maxToolCalls": 1,
+    "requiresOrchestration": ["supervisor"]
+  },
+  {
+    "id": "multi-route-files",
+    "input": "请用 list_dir 列出沙箱根目录有哪些文件，告诉我是否包含 sample-notes.txt。不要搜索文档，不要查时间或写文件。",
+    "expectedRoutedAgent": "files",
+    "expectedTools": ["list_dir"],
+    "forbiddenTools": ["search_docs", "http_fetch", "time", "write_file"],
+    "expectedKeywords": ["sample-notes.txt"],
+    "maxToolCalls": 1,
+    "requiresOrchestration": ["supervisor"]
+  },
+  {
+    "id": "multi-route-general",
+    "input": "现在几点了？请调用 time 工具一句话回答。不要读文件，不要搜索文档，不要列目录。",
+    "expectedRoutedAgent": "general",
+    "expectedTools": ["time"],
+    "forbiddenTools": ["search_docs", "read_file", "list_dir", "write_file"],
+    "maxToolCalls": 1,
+    "requiresOrchestration": ["supervisor"]
   }
 ]

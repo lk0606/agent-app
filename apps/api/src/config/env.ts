@@ -51,10 +51,16 @@ export interface AppConfig {
   llmPricePromptPer1MUsd: number;
   llmPriceCompletionPer1MUsd: number;
   /**
-   * E.10：危险工具跳过人工挂起、立刻 approve。
+ * E.10：危险工具跳过人工挂起、立刻 approve。
    * HTTP server 默认 false；evals:run 脚本会强制 true，避免挂死。
    */
   confirmationAutoApprove: boolean;
+  /**
+   * E.12：编排模式。
+   * - supervisor：先路由专家再跑 Planner（工具子集）
+   * - single：直接 Planner + 全量工具（与 E.11 前行为一致，便于对比/救急）
+   */
+  agentOrchestration: "supervisor" | "single";
   port: number;
 }
 
@@ -113,6 +119,8 @@ export function loadConfig(): AppConfig {
     llmPriceCompletionPer1MUsd: readNonNegativeNumber("LLM_PRICE_COMPLETION_PER_1M_USD", 1.5),
     // E.10：仅显式开启时自动批准；dev:server 手测确认须保持 false
     confirmationAutoApprove: readBoolean("CONFIRMATION_AUTO_APPROVE", false),
+    // E.12：默认走 Supervisor；设 single 可对比单 Agent / 救急绕过路由
+    agentOrchestration: readAgentOrchestration(process.env.AGENT_ORCHESTRATION),
     port: readNumber("PORT", 3000),
   };
 }
@@ -182,6 +190,15 @@ function readSearchDocsMode(value: string | undefined): AppConfig["searchDocsMod
   }
 
   return "keyword";
+}
+
+/** 非法 / 空 → supervisor（E.12 默认）；仅显式 single 关闭多 Agent */
+function readAgentOrchestration(value: string | undefined): AppConfig["agentOrchestration"] {
+  if (value === "single" || value === "supervisor") {
+    return value;
+  }
+
+  return "supervisor";
 }
 
 function readBoolean(name: string, fallback: boolean): boolean {

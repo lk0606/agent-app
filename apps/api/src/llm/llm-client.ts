@@ -1,8 +1,9 @@
 /**
- * LlmClient 接口：PlannerAgent 对模型的三次调用。
- * - plan：决定是否 function calling
+ * LlmClient 接口：Agent 对模型的调用面。
+ * - plan：决定是否 function calling（Planner 循环）
  * - answerWithTool：拿工具结果组织自然语言（可 stream）
  * - summarizeSession：把旧会话压成 summary 写回 sessions 表
+ * - routeSpecialty：E.12 Supervisor 分诊（docs | files | general），与 plan 的工具选型 prompt 分离
  *
  * E.8.5：各 Request 可带 signal，混元 HTTP 中途可被 cancel/超时 abort。
  * E.9：各 Request 可带 onLlmCall，回报 token 用量与单次耗时（写入 task_metrics，非 traceId）。
@@ -12,6 +13,19 @@ import type { LlmCallMetrics } from "../runtime/task-metrics.js";
 export interface ToolDefinition {
   name: string;
   description: string;
+}
+
+/** E.12：Supervisor 可选专家 id；与 plannerTrace.routed 的 toolName 对齐 */
+export type SpecialistId = "docs" | "files" | "general";
+
+export interface RouteSpecialtyRequest {
+  userInput: string;
+  specialists: Array<{
+    id: SpecialistId;
+    description: string;
+  }>;
+  signal?: AbortSignal;
+  onLlmCall?: (event: LlmCallMetrics) => void;
 }
 
 export interface PlannerDecision {
@@ -78,4 +92,9 @@ export interface LlmClient {
   plan(input: PlanRequest): Promise<PlannerDecision>;
   answerWithTool(input: AnswerRequest, options?: LlmStreamOptions): Promise<string>;
   summarizeSession(input: SessionSummaryRequest): Promise<string>;
+  /**
+   * E.12：只做专家分诊，不执行工具。
+   * 解析失败 / 未选 function 时实现方应回退 `general`（保守，避免锁死错误子集）。
+   */
+  routeSpecialty(input: RouteSpecialtyRequest): Promise<SpecialistId>;
 }

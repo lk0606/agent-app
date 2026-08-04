@@ -25,7 +25,12 @@ export type PlannerStepOutcome =
   | "duplicate_skipped"
   | "fallback_answer"
   /** E.10：人拒绝执行需确认的工具（未真正 execute） */
-  | "human_rejected";
+  | "human_rejected"
+  /**
+   * E.12：Supervisor 分诊一步（非真实工具执行）。
+   * toolName = 专家 id（docs / files / general）；真实工具落在后续 step。
+   */
+  | "routed";
 
 export type SessionStatus = "active" | "archived";
 

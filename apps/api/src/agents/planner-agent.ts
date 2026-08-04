@@ -14,13 +14,16 @@ type LlmConversationMessage = {
 };
 
 /**
- * PlannerAgent：本项目的 Agent 核心循环。
+ * PlannerAgent：本项目的 Agent 核心循环（也可被 Supervisor 以工具子集委托）。
  *
  * 每一轮 step：
  *   llm.plan() → 要不要工具 → 执行 Tool → recordPlannerStep / recordToolCall
  *   → 工具足够时 llm.answerWithTool() 流式生成最终回答
  *
  * 有 sessionId 时先 buildSessionContext()：旧消息压成 summary，最近 N 条保留原文。
+ *
+ * E.12：context.stepOffset>0 时，落库/SSE 的 step = 内部步号 + offset
+ * （Supervisor 占用 step 1 的 routed 后，专家从 step 2 起写）。
  */
 export class PlannerAgent implements Agent {
   constructor(
@@ -41,12 +44,14 @@ export class PlannerAgent implements Agent {
     const toolCalls: AgentResponse["toolCalls"] = [];
     let finalAnswer = "";
     const streamedFlag = { value: false }; // answerWithTool 是否已推过 token（SSE 用）
+    // E.12：Supervisor 已写 step 1（routed）时 offset=1，避免专家 step 与路由步冲突
+    const stepOffset = context.stepOffset ?? 0;
 
     for (let step = 0; step < this.options.maxSteps; step += 1) {
       // E.8：每步开始前检查取消/超时，避免 abort 后继续打 LLM
       throwIfAborted(context.signal);
 
-      const stepNumber = step + 1;
+      const stepNumber = step + 1 + stepOffset;
       const stepStartedAt = Date.now();
       const stepCreatedAt = new Date(stepStartedAt).toISOString();
 
@@ -337,7 +342,8 @@ export class PlannerAgent implements Agent {
 
       const fallbackStartedAt = Date.now();
       const fallbackCreatedAt = new Date(fallbackStartedAt).toISOString();
-      const fallbackStep = toolCalls.length + 1;
+      // 与循环内一致：计入 stepOffset，避免与 Supervisor routed 步撞号
+      const fallbackStep = toolCalls.length + 1 + stepOffset;
 
       finalAnswer = await this.answerFromToolResult(context, request, sessionContext, lastCall, streamedFlag);
 

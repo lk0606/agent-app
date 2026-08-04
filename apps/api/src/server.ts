@@ -7,7 +7,7 @@
  * 3. Task 观测与控制：GET /tasks/:id；POST /tasks/:id/cancel（E.8）；POST /tasks/:id/confirm（E.10）
  * 4. 健康检查：GET /health
  *
- * 编排链：本文件 → prepareAgentRun → TaskRunner → PlannerAgent → LlmClient / Tools → MemoryStore(Postgres)
+ * 编排链：本文件 → prepareAgentRun → TaskRunner → SupervisorAgent(可选) / PlannerAgent → LlmClient / Tools → MemoryStore(Postgres)
  */
 import "dotenv/config";
 

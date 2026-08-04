@@ -1,6 +1,9 @@
 /**
  * Agent 抽象层：定义一次任务请求的入参/出参，以及 plan() 运行时需要的依赖。
- * 当前唯一实现是 PlannerAgent（多步 plan → 可选 tool → answer）。
+ *
+ * 实现：
+ * - PlannerAgent：多步 plan → 可选 tool → answer（也可被 Supervisor 以工具子集调用）
+ * - SupervisorAgent（E.12）：先路由到专家，再委托 PlannerAgent
  */
 import type { AgentStreamEvent } from "@agent-app/api-contract";
 import type { LlmClient } from "../llm/llm-client.js";
@@ -34,6 +37,12 @@ export interface AgentContext {
   confirmations?: ConfirmationRegistry;
   /** E.10：true 时跳过人工挂起，立刻 approve（evals / smoke 无 HTTP 确认方） */
   confirmationAutoApprove?: boolean;
+  /**
+   * E.12：Supervisor 已占用 step 1（outcome=routed）时，专家 Planner 落库/SSE 的 step 偏移。
+   * 例：stepOffset=1 → 专家内部第 1 步写入 planner_steps.step=2。
+   * 单 Agent 模式默认 0，行为与改前一致。
+   */
+  stepOffset?: number;
 }
 
 export interface AgentRequest {

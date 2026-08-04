@@ -14,7 +14,7 @@
  * Token 从哪来：混元响应里的 usage（prompt_tokens / completion_tokens），
  * **不是**按字符数 string.length 自己算。
  */
-export type LlmCallPurpose = "plan" | "answer" | "summarize";
+export type LlmCallPurpose = "plan" | "answer" | "summarize" | "route";
 
 export interface LlmTokenUsage {
   /** 发给模型的输入 token（system + user + tools 定义等） */

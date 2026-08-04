@@ -1,0 +1,36 @@
+---
+description: 超过 1 个等值判断时用 includes，禁止一串 === / !== 用 || / && 串联
+alwaysApply: true
+---
+
+# 多值判断用 includes
+
+写 TypeScript / JavaScript 时：对**同一表达式**做超过 1 个等值比较，必须用 `includes`（或 `Set.has`），不要用一长串 `===` / `!==` 用 `||` / `&&` 串联。
+
+## 要这样写
+
+```typescript
+// ✅ 白名单（属于集合）
+tools.filter((tool) => ["search_docs", "read_file", "list_dir"].includes(tool.name));
+
+// ✅ 非法值拦截（不属于集合）
+if (typeof purpose !== "string" || !["plan", "answer", "summarize", "route"].includes(purpose)) {
+  return [];
+}
+```
+
+## 不要这样写
+
+```typescript
+// ❌
+tool.name === "search_docs" || tool.name === "read_file" || tool.name === "list_dir"
+
+// ❌
+purpose !== "plan" && purpose !== "answer" && purpose !== "summarize" && purpose !== "route"
+```
+
+## 边界
+
+- **只有 1 个**等值判断：继续用 `===` / `!==` 即可
+- 集合会复用、或成员很多时：可抽 `const ALLOWED = [...] as const`，再 `.includes(...)`
+- `unknown` 入参先 `typeof === "string"`（或其它窄化），再 `includes`
