@@ -30,7 +30,12 @@ export type PlannerStepOutcome =
    * E.12：Supervisor 分诊一步（非真实工具执行）。
    * toolName = 专家 id（docs / files / general）；真实工具落在后续 step。
    */
-  | "routed";
+  | "routed"
+  /**
+   * E.12.x：受限专家请求升级到 general（非真实工具执行）。
+   * toolName 固定为 general；紧跟下一条 routed 才是 Supervisor 的二次分诊。
+   */
+  | "escalated";
 
 export type SessionStatus = "active" | "archived";
 

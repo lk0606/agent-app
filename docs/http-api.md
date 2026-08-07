@@ -207,7 +207,7 @@ GET /tasks/:taskId
     "plannerStepCount": 2,
     "estimatedCostUsd": 0.00058,
     "llmCalls": [
-      { "purpose": "plan", "model": "hy3-preview", "promptTokens": 500, "completionTokens": 40, "totalTokens": 540, "durationMs": 900 }
+      { "purpose": "plan", "model": "minimax-m2.5", "promptTokens": 500, "completionTokens": 40, "totalTokens": 540, "durationMs": 900 }
     ]
   },
   "pendingConfirmation": null

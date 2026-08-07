@@ -388,12 +388,36 @@ curl -s http://localhost:3000/sessions/$SESSION_ID | jq '.session | {summary, su
 ### TokenHub 配置（三者配套）
 
 ```bash
-HUNYUAN_MODEL=hy3-preview
+HUNYUAN_MODEL=minimax-m2.5
 HUNYUAN_BASE_URL=https://tokenhub.tencentmaas.com/v1
 HUNYUAN_API_KEY=<TokenHub 控制台 Key>
 ```
 
 旧 `api.hunyuan.cloud.tencent.com` 的 Key **不能**用于 TokenHub。
+当前学习配置从能力排序末尾的 `minimax-m2.5` 开始。它支持工具调用，但 M2.x 的 thinking 无法关闭；
+客户端传 `reasoning_split: true`，把推理字段与最终 `content` 分开，避免 `<think>` 文本被当作 Agent 答复。
+
+### 学习期模型顺序（由弱到强）
+
+这不是不同厂商的统一 benchmark 名次，而是按本项目的 Agent 工具调用适配度与模型代际排出的试用顺序。
+每个模型的免费额度用完后，把 `.env` 的 `HUNYUAN_MODEL` 改为上一位；工具调用不稳定时可直接回退到已验证的 `deepseek-v4-flash`。
+
+1. `minimax-m2.5`（当前）
+2. `kimi-k2.5`
+3. `deepseek-v3.2`
+4. `glm-5`
+5. `minimax-m2.7`
+6. `kimi-k2.6`
+7. `glm-5-turbo`
+8. `glm-5.1`
+9. `hy3`
+10. `hy3-preview`
+11. `qwen3.5-flash`
+12. `deepseek-v4-flash`
+13. `mimo-v2.5-pro`
+14. `glm-5.2`
+15. `kimi-k3`
+16. `minimax-m3`
 
 ---
 

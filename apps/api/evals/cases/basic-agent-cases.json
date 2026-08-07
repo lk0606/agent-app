@@ -239,5 +239,15 @@
     "forbiddenTools": ["search_docs", "read_file", "list_dir", "write_file"],
     "maxToolCalls": 1,
     "requiresOrchestration": ["supervisor"]
+  },
+  {
+    "id": "multi-escalate-files-to-general",
+    "input": "请务必先调用 time 工具获取当前时间，再调用 write_file 把时间写入沙箱相对路径 handoff-time.txt。不要搜索或读取文档。",
+    "expectedRoutedAgent": "files",
+    "expectedEscalationToGeneral": true,
+    "expectedTools": ["time", "write_file"],
+    "forbiddenTools": ["search_docs", "http_fetch"],
+    "maxToolCalls": 2,
+    "requiresOrchestration": ["supervisor"]
   }
 ]

@@ -51,7 +51,7 @@ pnpm run dev
 
 ```bash
 HUNYUAN_API_KEY=your_tokenhub_api_key
-HUNYUAN_MODEL=hy3-preview
+HUNYUAN_MODEL=minimax-m2.5
 HUNYUAN_BASE_URL=https://tokenhub.tencentmaas.com/v1
 AGENT_MAX_STEPS=3
 AGENT_TOOL_CALL_BUDGET=2

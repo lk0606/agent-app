@@ -6,20 +6,19 @@
  * 2. llm.routeSpecialty → 选 docs | files | general
  * 3. recordPlannerStep(outcome=routed, toolName=专家 id) 占 step 1
  * 4. PlannerAgent.plan(tools=该专家子集, stepOffset=1) → 写后续 planner_steps / tool_calls
- * 5. 返回专家的 AgentResponse 给 TaskRunner 收尾
- * 旁路：取消/超时透传 signal；路由失败抛 LLM_ERROR；不确定专家应落 general（由路由实现保证）
+ * 5. 若受限专家请求升级 → 记 escalated + routed/general，再委托全量工具 Planner
+ * 6. 返回专家的 AgentResponse 给 TaskRunner 收尾
+ * 旁路：general 禁止再次升级；取消/超时透传 signal；路由失败抛 LLM_ERROR；不确定专家应落 general。
  *
- * 本文件执行链路：见方法上的 [1]…[3]
- * [1] plan → [2] routeSpecialty + 落库 routed → [3] 委托 PlannerAgent
- *
- * 本版不做 A→B 热转接（误路由靠保守 general + 后续 E.12.x handoff）。
+ * 本文件执行链路：见方法上的 [1]…[4]
+ * [1] plan → [2] routeSpecialty + 落库 routed → [3] 委托受限 Planner → [4] 升级 general
  */
 import type { SpecialistId } from "../llm/llm-client.js";
 import { throwIfAborted } from "../runtime/abort-utils.js";
 import { AppError } from "../shared/app-error.js";
 import type { Tool } from "../tools/tool.js";
 import type { Agent, AgentContext, AgentRequest, AgentResponse } from "./base-agent.js";
-import type { PlannerAgent } from "./planner-agent.js";
+import { EscalateToGeneralError, type PlannerAgent } from "./planner-agent.js";
 
 export type SpecialistCatalog = Record<SpecialistId, Tool[]>;
 
@@ -41,7 +40,7 @@ export class SupervisorAgent implements Agent {
 
   /** [1] 入口：路由一次后委托专家 Planner；与单 Planner 同为 TaskRunner 的 agent.plan */
   async plan(request: AgentRequest, context: AgentContext): Promise<AgentResponse> {
-    throwIfAborted(context.signal);56
+    throwIfAborted(context.signal);
 
     const routeStartedAt = Date.now();
     const routeCreatedAt = new Date(routeStartedAt).toISOString();
@@ -96,11 +95,70 @@ export class SupervisorAgent implements Agent {
       finishedAt: new Date().toISOString(),
     });
 
-    // [3] 专家跑完整 plan 循环；stepOffset=1 让专家从 step 2 起落库
-    return this.options.planner.plan(request, {
-      ...context,
-      tools,
-      stepOffset: 1,
-    });
+    try {
+      // [3] 专家跑完整 plan 循环；stepOffset=1 让专家从 step 2 起落库。
+      // docs/files 可请求升级；general 的工具名同时传入，供 Planner 识别“当前缺少但 general 可执行”的隐式升级。
+      return await this.options.planner.plan(request, {
+        ...context,
+        tools,
+        stepOffset: 1,
+        allowEscalationToGeneral: specialistId !== "general",
+        generalToolNames: this.options.specialists.general.map((tool) => tool.name),
+      });
+    } catch (error: unknown) {
+      // 只有内部升级信号才能触发二次分诊；LLM、工具、落库等真实失败必须原样交给 TaskRunner 标记任务失败。
+      if (!(error instanceof EscalateToGeneralError)) {
+        throw error;
+      }
+
+      throwIfAborted(context.signal);
+      const generalTools = this.options.specialists.general;
+
+      // 装配错误：general 必须是全量工具兜底；不能把“无 fallback”伪装成任务失败。
+      if (!generalTools || generalTools.length === 0) {
+        throw new AppError("INTERNAL_ERROR", 'Supervisor has no tools registered for specialist "general".');
+      }
+
+      const rerouteStartedAt = Date.now();
+      const rerouteCreatedAt = new Date(rerouteStartedAt).toISOString();
+
+      context.logger.info("Supervisor escalated specialist to general", {
+        fromSpecialistId: specialistId,
+        toSpecialistId: "general",
+        toolNames: generalTools.map((tool) => tool.name),
+      });
+
+      // [4] step 2 已由 Planner 写 escalated；step 3 记录 Supervisor 接受升级后的二次分诊。
+      // 合法例：routed/docs → escalated/general → routed/general；general 不再允许 escalated。
+      context.emitStream?.({
+        type: "planner_decision",
+        taskId: request.taskId,
+        step: 3,
+        needsTool: false,
+        toolName: "general",
+        toolInput: null,
+      });
+
+      await context.memory.recordPlannerStep({
+        taskId: request.taskId,
+        step: 3,
+        needsTool: false,
+        toolName: "general",
+        toolInput: null,
+        outcome: "routed",
+        durationMs: Date.now() - rerouteStartedAt,
+        createdAt: rerouteCreatedAt,
+        finishedAt: new Date().toISOString(),
+      });
+
+      // general 取得全量工具后继续规划（如 time → write_file）；不再暴露升级 function，最多升级一次。
+      return this.options.planner.plan(request, {
+        ...context,
+        tools: generalTools,
+        stepOffset: 3,
+        allowEscalationToGeneral: false,
+        continuePlanningAfterToolCalls: true,
+      });
+    }
   }
 }

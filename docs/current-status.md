@@ -2,7 +2,7 @@
 
 这是项目的**唯一进度状态源**。做完一项就更新一项，其他文档只保留设计细节，不再各自维护「已完成 / 下一步」。
 
-最后更新：2026-08-04（E.12 Multi-Agent：Supervisor + 专家）
+最后更新：2026-08-05（E.12.x：专家升级到 general）
 
 ## 30 秒阅读指南
 
@@ -118,7 +118,7 @@ AI / 协作者交付任务时：**聊天里说明 + 源码注释 + 合并前写�
 
 **路线：** 后端优先学习（见【E 节】与 `.cursor/rules/backend-first-learning.mdc`）。前端工作台仅辅助观察后端；日常用 `curl` + `evals:run` + `task:replay` 验证即可。
 
-**当前开发重点：** **E.12 Multi-Agent** 已交付（Supervisor 路由 + 专家工具子集 + `multi-route-*` eval）。可选：E.12.x handoff，或独立 `/tasks/[taskId]` 页。
+**当前开发重点：** **E.12 Multi-Agent** 已交付，含 E.12.x「专家升级到通用专家」：受限专家缺能力时可升级一次给 `general`。可选：独立 `/tasks/[taskId]` 页。
 
 **前端何时再动：**
 
@@ -1218,9 +1218,9 @@ pnpm run evals:run -- --id blocked-write-traversal
 
 | | |
 |--|--|
-| **状态** | 已完成 |
-| **目标** | 引入 Supervisor 一次路由 + 专家 Planner（工具子集）；路由可观测；补 multi-route eval |
-| **改动范围** | `supervisor-agent.ts`、`routeSpecialty`、`create-agent-runtime`、`stepOffset`、契约 `routed` / metrics `route`、`multi-route-*` cases |
+| **状态** | 已完成（含 E.12.x 专家升级） |
+| **目标** | Supervisor 路由 + 专家工具子集；受限专家可升级一次到全量工具 `general`；路由过程可观测 |
+| **改动范围** | `supervisor-agent.ts`、`planner-agent.ts`、`routeSpecialty`、`create-agent-runtime`、`stepOffset`、契约 `routed` / `escalated` / metrics `route`、`multi-route-*` cases |
 | **学习笔记** | [`docs/backend-learning/multi-agent-notes.md`](backend-learning/multi-agent-notes.md)（含完整测试与验收） |
 
 #### 已交付
@@ -1230,9 +1230,11 @@ pnpm run evals:run -- --id blocked-write-traversal
 | **SupervisorAgent** | `routeSpecialty` → `planner_steps` step1 `outcome=routed` → 委托 Planner |
 | **专家子集** | `docs` / `files` / `general`（全量）；不确定应落 `general` |
 | **stepOffset** | 专家从 step 2 起写，避免与 routed 撞号 |
+| **专家升级（E.12.x）** | `docs/files` 缺能力时升级一次：显式请求、选中仅 general 有的工具、或用户直接点名 general 专属工具均由后端转为 `escalated/general`，再二次路由 `general` |
+| **组合工具任务** | 升级后的 `general` 在工具预算内继续规划；用户直接按顺序点名工具时下一轮仅暴露该项，重复已成功工具则下一轮排除它，例如 `time` 后再 `write_file` |
 | **开关** | `AGENT_ORCHESTRATION=supervisor\|single`（默认 supervisor） |
-| **eval** | `multi-route-docs` / `files` / `general` + `expectedRoutedAgent` 断言 |
-| **用例数** | 文件 **29** 条；keyword 模式约 **28** 条（跳过 `search-docs-city-zh`；`single` 时再跳过 3 条 multi-route） |
+| **eval** | `multi-route-*` + `multi-escalate-files-to-general`；断言路由、升级与工具链 |
+| **用例数** | 文件 **30** 条；keyword 模式约 **29** 条（跳过 `search-docs-city-zh`；`single` 时再跳过 4 条多 Agent case） |
 
 #### 测试方法
 
@@ -1243,6 +1245,7 @@ pnpm run check:all
 pnpm run evals:run -- --id multi-route-docs
 pnpm run evals:run -- --id multi-route-files
 pnpm run evals:run -- --id multi-route-general
+pnpm run evals:run -- --id multi-escalate-files-to-general
 
 # 肉眼看路由（注意 -- 后空格）
 pnpm run task:replay -- <报告里的 taskId>
@@ -1251,7 +1254,7 @@ pnpm run task:replay -- <报告里的 taskId>
 pnpm run evals:run
 ```
 
-- **算对：** 三条 multi-route `passed: true`；replay 见 `plannerTrace[0].outcome=routed` 且 `tool_name` 为期望专家；真实工具在 step≥2；`metrics.llmCalls` 含 `purpose=route`
+- **算对：** 三条 `multi-route-*` 通过；升级 case 依次出现 `routed/files → escalated/general → routed/general`，再执行 `time → write_file`；真实工具在 step≥2；`metrics.llmCalls` 含 `purpose=route`
 - **算错：** `Expected routed agent "X" but …` → 分诊偏了；`Expected tool was not used` → 专家对了但没调工具
 - **对照：** `AGENT_ORCHESTRATION=single` 时 multi-route case 应被 skip
 - 细则与 fail 对照表：[`multi-agent-notes.md` §怎么测、怎样算对](backend-learning/multi-agent-notes.md#怎么测怎样算对)
@@ -1260,20 +1263,22 @@ pnpm run evals:run
 
 1. **多 Agent 实质是决策权拆分**：Supervisor 选人，专家在小工具箱里再 plan——不是只给工具分组。
 2. **`routed` ≠ 工具执行**：分诊只写 `planner_steps`；`tool_calls` 仍是专家真正调的工具。
-3. **route-once 的代价**：误路由本版不热转；靠保守 `general` + 可观测；handoff 留 E.12.x。
+3. **专家升级由后端兜底**：受限专家可显式请求；若模型直接选到仅 `general` 有的工具，或用户明确点名该工具，Planner 都会升级。`escalated` 只表示请求，紧随的 `routed/general` 才表示 Supervisor 已接受。
 4. **eval 要断言「分到谁」**：`expectedRoutedAgent` 查 `outcome=routed`，不能只断言 `expectedTools`。
+5. **组合任务需要继续规划**：升级后的 `general` 不会在第一个工具成功后立刻回答；用户明确点名的工具按未完成顺序逐轮暴露给模型（TokenHub 仅支持 `tool_choice="auto"`）。重复已成功工具仍会记录 `duplicate_skipped` 并在下一轮排除。
 
 #### 代码怎么读
 
 | 顺序 | 文件 | 看什么 |
 |------|------|--------|
-| 1 | `apps/api/src/agents/supervisor-agent.ts` | 路由 → 落库 routed → 委托 |
-| 2 | `apps/api/src/llm/hunyuan-llm-client.ts` | `routeSpecialty` |
-| 3 | `apps/api/src/app/create-agent-runtime.ts` | 专家子集 + 编排开关 |
-| 4 | `apps/api/evals/cases/basic-agent-cases.json` | `multi-route-*` |
-| 5 | `apps/api/src/scripts/run-evals.ts` | `expectedRoutedAgent` |
+| 1 | `apps/api/src/agents/supervisor-agent.ts` | 初次路由、捕获升级、二次路由 general |
+| 2 | `apps/api/src/agents/planner-agent.ts` | 显式升级与“当前缺少、general 有”的工具自动升级；组合工具任务续跑 |
+| 3 | `apps/api/src/llm/hunyuan-llm-client.ts` | `routeSpecialty`、受限专家的升级 function |
+| 4 | `apps/api/src/app/create-agent-runtime.ts` | 专家子集 + 编排开关 |
+| 5 | `apps/api/evals/cases/basic-agent-cases.json` | `multi-route-*` / `multi-escalate-*` |
+| 6 | `apps/api/src/scripts/run-evals.ts` | `expectedRoutedAgent` / `expectedEscalationToGeneral` |
 
-心智模型：`分诊 → routed 可观测 → 专家小工具箱 plan → multi-route eval 绿`。
+心智模型：`初次分诊 → routed → 受限专家发现缺能力 → escalated → 二次 routed/general → 全量工具完成剩余步骤 → eval 绿`。
 
 ---
 

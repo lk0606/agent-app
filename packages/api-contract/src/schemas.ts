@@ -76,6 +76,11 @@ export const PlannerStepOutcomeSchema = z.enum([
    * toolName 为专家 id：docs | files | general；随后由该专家的 Planner 继续写后续 step。
    */
   "routed",
+  /**
+   * E.12.x：受限专家请求升级到 general（非真实工具）。
+   * 紧随其后的 routed/general 才表示 Supervisor 已接受这次升级。
+   */
+  "escalated",
 ]);
 
 export const PlannerStepRecordSchema = z.object({

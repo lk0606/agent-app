@@ -43,6 +43,21 @@ export interface AgentContext {
    * 单 Agent 模式默认 0，行为与改前一致。
    */
   stepOffset?: number;
+  /**
+   * E.12.x：仅 docs/files 专家可请求升级给 general；general 本身为全量工具，禁止再次升级。
+   * 例：files 收到“先查文档再写文件”但没有 search_docs → 请求升级，而非假装完成。
+   */
+  allowEscalationToGeneral?: boolean;
+  /**
+   * E.12.x：general 的业务工具名，用来识别“当前专家缺少、但 general 能执行”的选择。
+   * 例：files 选 time（当前没有、general 有）→ 自动升级；选 imaginary_tool（全局也没有）→ TOOL_ERROR。
+   */
+  generalToolNames?: readonly string[];
+  /**
+   * E.12.x：升级后的 general 可在工具预算内继续规划，完成跨能力任务的后续动作。
+   * 例：先 time 取时间，再 write_file 写入；普通单专家任务仍保持一次工具后回答的既有行为。
+   */
+  continuePlanningAfterToolCalls?: boolean;
 }
 
 export interface AgentRequest {

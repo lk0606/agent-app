@@ -14,16 +14,27 @@ type LlmConversationMessage = {
 };
 
 /**
+ * E.12.x：受限专家无法完成时，通知 Supervisor 改派给 general 的内部控制信号。
+ * 它只在同一次 `SupervisorAgent.plan()` 内被捕获，不能冒泡到 TaskRunner 变成任务失败。
+ */
+export class EscalateToGeneralError extends Error {
+  constructor() {
+    super("Restricted specialist requested escalation to general.");
+    this.name = "EscalateToGeneralError";
+  }
+}
+
+/**
  * PlannerAgent：本项目的 Agent 核心循环（也可被 Supervisor 以工具子集委托）。
  *
- * 每一轮 step：
- *   llm.plan() → 要不要工具 → 执行 Tool → recordPlannerStep / recordToolCall
- *   → 工具足够时 llm.answerWithTool() 流式生成最终回答
+ * 常规执行顺序（跨模块）：
+ * 1. TaskRunner 调本类 plan；supervisor 模式先由 Supervisor 选专家与工具子集。
+ * 2. plan 读取会话上下文 → LlmClient.plan 决定工具或直接回答 → Tool 执行并写 planner_steps / tool_calls。
+ * 3. 工具结果交 LlmClient.answerWithTool 组织回答，最后写 messages，由 TaskRunner 收尾 HTTP/SSE。
+ * 旁路：受限专家缺 general 工具时抛 EscalateToGeneralError，由 Supervisor 改派；危险 Tool 则先等人工确认。
  *
- * 有 sessionId 时先 buildSessionContext()：旧消息压成 summary，最近 N 条保留原文。
- *
- * E.12：context.stepOffset>0 时，落库/SSE 的 step = 内部步号 + offset
- * （Supervisor 占用 step 1 的 routed 后，专家从 step 2 起写）。
+ * 本文件执行链路：见方法上的 [1]…[4]
+ * [1] plan → [2] awaitHumanConfirmation → [3] answerFromToolResult → [4] buildSessionContext
  */
 export class PlannerAgent implements Agent {
   constructor(
@@ -35,7 +46,10 @@ export class PlannerAgent implements Agent {
     },
   ) {}
 
-  // Agent 核心循环：每轮 llm.plan → 可选工具 → 生成 finalAnswer；落库 planner_steps / tool_calls / messages
+  /**
+   * [1] Agent 核心循环：输入任务与运行上下文，输出最终回答和已执行工具；同时落 planner_steps / tool_calls / messages。
+   * supervisor 预占 routed step 时用 stepOffset 避免与专家内部步骤冲突。
+   */
   async plan(request: AgentRequest, context: AgentContext): Promise<AgentResponse> {
     // 0. 有 session 时：旧消息 summarize + 最近 N 条原文，供本轮 LLM 上下文
     const sessionContext = request.sessionId
@@ -46,6 +60,20 @@ export class PlannerAgent implements Agent {
     const streamedFlag = { value: false }; // answerWithTool 是否已推过 token（SSE 用）
     // E.12：Supervisor 已写 step 1（routed）时 offset=1，避免专家 step 与路由步冲突
     const stepOffset = context.stepOffset ?? 0;
+    // E.12.x：升级后的组合任务若重复已成功工具，下一轮从 LLM 可见工具中排除它。
+    // 例：time 已成功却再次被选中 → 后续只让模型看到 write_file 等未排除工具。
+    const excludedToolNames = new Set<string>();
+    // 连续规划只处理用户显式写出的工具名；按输入顺序强制下一项，避免 “time → write_file” 被模型改成重复 time。
+    // 例：`先 time 再 write_file` → ["time", "write_file"]。
+    // 未点名工具时是原有自动选型：llm.plan 同时看到当前专家的可用工具与用户意图，自行返回某个 tool_call 或直接回答。
+    // 例：`现在几点` → time；`解释 TypeScript` → 不调工具；不会由后端预先指定某个工具。
+    const requiredToolNames = context.continuePlanningAfterToolCalls
+      ? context.tools
+          .map((tool) => ({ name: tool.name, index: request.input.indexOf(tool.name) }))
+          .filter((item) => item.index >= 0)
+          .sort((left, right) => left.index - right.index)
+          .map((item) => item.name)
+      : [];
 
     for (let step = 0; step < this.options.maxSteps; step += 1) {
       // E.8：每步开始前检查取消/超时，避免 abort 后继续打 LLM
@@ -54,6 +82,37 @@ export class PlannerAgent implements Agent {
       const stepNumber = step + 1 + stepOffset;
       const stepStartedAt = Date.now();
       const stepCreatedAt = new Date(stepStartedAt).toISOString();
+
+      // E.12.x：用户明确点名的工具若只存在于 general，不让受限专家靠模型猜“该升级”。
+      // 合法例：files 收到 `time` + `write_file`，time 不在 files 但在 general → 直接 escalated；
+      // 非法例：imaginary_tool 全局不存在 → 不升级，仍交给下方 Planner/TOOL_ERROR 正常处理。
+      const requestedGeneralOnlyToolName = context.allowEscalationToGeneral
+        ? context.generalToolNames?.find(
+            (toolName) =>
+              request.input.includes(toolName) && !context.tools.some((tool) => tool.name === toolName),
+          )
+        : undefined;
+
+      // 当前专家不能执行用户点名的 general 专属工具；先落 `escalated/general`，再抛内部信号让 Supervisor 记二次 `routed/general`。
+      // 例：files 收到 `time` + `write_file` 时，time 触发此分支；不能在 files 内伪造 time 的执行结果。
+      if (requestedGeneralOnlyToolName) {
+        context.logger.info("Planner escalated explicit general-only tool before planning", {
+          step: stepNumber,
+          requestedToolName: requestedGeneralOnlyToolName,
+        });
+        await context.memory.recordPlannerStep({
+          taskId: request.taskId,
+          step: stepNumber,
+          needsTool: false,
+          toolName: "general",
+          toolInput: null,
+          outcome: "escalated",
+          durationMs: Date.now() - stepStartedAt,
+          createdAt: stepCreatedAt,
+          finishedAt: new Date().toISOString(),
+        });
+        throw new EscalateToGeneralError();
+      }
 
       // A. 问 LLM：本轮要不要工具、调哪个
       const decision = await context.llm.plan({
@@ -69,6 +128,15 @@ export class PlannerAgent implements Agent {
           toolInput: call.input,
           toolOutput: call.output,
         })),
+        // docs/files 才能看见虚拟 escalate_to_general；general 不可升级，避免路由循环。
+        allowEscalationToGeneral: context.allowEscalationToGeneral,
+        // 仅升级后的 general 连续执行剩余工具；普通专家保持原有单工具结束策略。
+        continuePlanningAfterToolCalls: context.continuePlanningAfterToolCalls,
+        excludedToolNames: [...excludedToolNames],
+        // 已成功工具从显式序列移除；剩余唯一项会在 LLM 客户端被 function calling 强制选中。
+        requiredToolNames: requiredToolNames.filter(
+          (toolName) => !toolCalls.some((call) => call.toolName === toolName),
+        ),
         signal: context.signal,
         // E.9：把本次 plan 的 token/耗时报给 TaskMetricsCollector
         onLlmCall: (event) => context.metrics?.recordLlmCall(event),
@@ -94,7 +162,28 @@ export class PlannerAgent implements Agent {
         });
       };
 
-      // B. 不需要工具 → outcome: direct_answer
+      /**
+       * B. 升级不是工具调用：记入 plannerTrace 后抛内部信号，交给 Supervisor 固定改派 general。
+       * 显式例：模型选虚拟 escalate_to_general；隐式例：files 选 time 而 time 仅在 general 中存在。
+       * 两种形态都不能写入 tool_calls，因为此时尚未执行真实业务工具。
+       */
+      const escalateToGeneral = async (): Promise<never> => {
+        await recordStep({
+          needsTool: false,
+          toolName: "general",
+          toolInput: null,
+          outcome: "escalated",
+          durationMs: Date.now() - stepStartedAt,
+          finishedAt: new Date().toISOString(),
+        });
+        throw new EscalateToGeneralError();
+      };
+
+      if (decision.escalateToGeneral) {
+        await escalateToGeneral();
+      }
+
+      // C. 不需要工具 → outcome: direct_answer
       if (!decision.needsTool || !decision.toolName) {
         // 若本轮已调过工具，用 answerWithTool；否则用 plan 返回的 draftAnswer
         if (toolCalls.length > 0) {
@@ -121,7 +210,7 @@ export class PlannerAgent implements Agent {
         break;
       }
 
-      // C. 工具预算用尽 → outcome: budget_exceeded
+      // D. 工具预算用尽 → outcome: budget_exceeded
       if (toolCalls.length >= this.options.toolCallBudget) {
         context.logger.info("Tool budget reached", {
           toolCallBudget: this.options.toolCallBudget,
@@ -145,25 +234,36 @@ export class PlannerAgent implements Agent {
         }
       }
 
-      // D. 解析工具名，找不到则抛 TOOL_ERROR
+      // E. 解析工具名。受限专家若选了 general 独有工具，后端自动升级，不依赖模型记住虚拟 function。
       const tool = context.tools.find((item) => item.name === decision.toolName);
 
       if (!tool) {
+        const isKnownGeneralTool =
+          context.allowEscalationToGeneral &&
+          context.generalToolNames?.includes(decision.toolName) === true;
+
+        // 合法例：files 工具箱无 time，但 general 有 → 自动升级；非法例：imaginary_tool 全局不存在 → 下方 TOOL_ERROR。
+        if (isKnownGeneralTool) {
+          context.logger.info("Planner escalated unavailable specialist tool to general", {
+            step: stepNumber,
+            requestedToolName: decision.toolName,
+          });
+          await escalateToGeneral();
+        }
+
         throw new AppError("TOOL_ERROR", `Requested tool "${decision.toolName}" is not registered.`);
       }
 
       const toolInput = decision.toolInput ?? request.input;
       const existingCall = toolCalls.find((call) => call.toolName === tool.name && call.input === toolInput);
 
-      // E. 重复工具调用 → outcome: duplicate_skipped
+      // F. 重复工具调用 → outcome: duplicate_skipped
       if (existingCall) {
         context.logger.info("Duplicate tool call skipped", {
           step: stepNumber,
           toolName: tool.name,
           toolInput,
         });
-
-        finalAnswer = await this.answerFromToolResult(context, request, sessionContext, existingCall, streamedFlag);
 
         await recordStep({
           needsTool: true,
@@ -173,6 +273,15 @@ export class PlannerAgent implements Agent {
           durationMs: Date.now() - stepStartedAt,
           finishedAt: new Date().toISOString(),
         });
+
+        // 升级后的组合任务不能因第一次重复就把“尚未写文件”等后续动作吞掉。
+        // 合法例：time → 又选 time → 排除 time 后重规划 write_file；普通任务仍保持原有“复用结果后回答”。
+        if (context.continuePlanningAfterToolCalls) {
+          excludedToolNames.add(tool.name);
+          continue;
+        }
+
+        finalAnswer = await this.answerFromToolResult(context, request, sessionContext, existingCall, streamedFlag);
         break;
       }
 
@@ -219,7 +328,7 @@ export class PlannerAgent implements Agent {
       const startedAt = new Date().toISOString();
 
       try {
-        // F. 执行工具 → outcome: tool_executed（成功路径）
+        // G. 执行工具 → outcome: tool_executed（成功路径）
         const toolOutput = await tool.execute({
           input: toolInput,
           // E.8：把任务 AbortSignal 传给工具，wait 等可中断工具才能中途停下
@@ -276,6 +385,12 @@ export class PlannerAgent implements Agent {
           finishedAt: new Date().toISOString(),
         });
 
+        // 升级后的 general 要能完成跨能力任务。
+        // 例：先 time 得到时间，再下一轮选 write_file；普通专家仍沿用“一次工具后回答”。
+        if (context.continuePlanningAfterToolCalls) {
+          continue;
+        }
+
         // 单工具任务（eval 基线均为 maxToolCalls=1）：工具成功后直接流式生成回答，跳过第二轮 plan。
         finalAnswer = await this.answerFromToolResult(
           context,
@@ -291,7 +406,7 @@ export class PlannerAgent implements Agent {
           throw error;
         }
 
-        // G. 工具失败 → outcome: tool_failed，向上抛出让 TaskRunner 标 failed
+        // H. 工具失败 → outcome: tool_failed，向上抛出让 TaskRunner 标 failed
         const errorCode = error instanceof AppError ? error.code : "TOOL_ERROR";
         const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -332,7 +447,7 @@ export class PlannerAgent implements Agent {
       }
     }
 
-    // H. 循环结束仍无回答 → outcome: fallback_answer（maxSteps 兜底）
+    // I. 循环结束仍无回答 → outcome: fallback_answer（maxSteps 兜底）
     if (!finalAnswer) {
       const lastCall = toolCalls[toolCalls.length - 1];
 
@@ -361,12 +476,12 @@ export class PlannerAgent implements Agent {
       });
     }
 
-    // I. 未走真流式时，把 finalAnswer 切片推 token（仅 /agent/stream）
+    // J. 未走真流式时，把 finalAnswer 切片推 token（仅 /agent/stream）
     if (context.emitStream && !streamedFlag.value && finalAnswer) {
       await emitTokenStream(context.emitStream, request.taskId, finalAnswer);
     }
 
-    // J. 写 assistant 消息，返回给 TaskRunner → HTTP result.summary
+    // K. 写 assistant 消息，返回给 TaskRunner → HTTP result.summary
     await context.memory.append(request.taskId, {
       role: "assistant",
       content: finalAnswer,
@@ -380,7 +495,7 @@ export class PlannerAgent implements Agent {
   }
 
   /**
-   * E.10：requiresConfirmation 工具在 execute 前挂起。
+   * [2] E.10：requiresConfirmation 工具在 execute 前挂起。
    * 返回值约定：
    * - `null` → 人已 approve，调用方继续 tool_start / execute
    * - `string` → 人已 reject，该字符串是最终回答，调用方应 break（勿再 execute）
@@ -535,6 +650,10 @@ export class PlannerAgent implements Agent {
     );
   }
 
+  /**
+   * [3] 将一个工具结果连同会话上下文交给 LLM，返回可直接写入 assistant message 的自然语言答复。
+   * 输入例：time 的 ISO 时间；输出例：`现在是 10:00`，流式时同步转发 SSE token。
+   */
   private async answerFromToolResult(
     context: AgentContext,
     request: AgentRequest,
@@ -559,7 +678,10 @@ export class PlannerAgent implements Agent {
     );
   }
 
-  // 组装喂给模型的会话上下文：旧内容走持久化摘要，最近内容保留原文。
+  /**
+   * [4] 组装喂给模型的会话上下文：旧内容走持久化摘要，最近内容保留原文。
+   * 示例：20 条历史且窗口为 8 → 早 12 条进入 sessions.summary，后 8 条原样传给 LLM。
+   */
   private async buildSessionContext(request: AgentRequest, context: AgentContext): Promise<{
     sessionSummary: string | null;
     recentHistory: LlmConversationMessage[];

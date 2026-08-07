@@ -521,7 +521,7 @@ curl -s -X POST http://localhost:3000/agent/run \
 - [ ] 能用手动 curl 复现 session 记忆
 - [ ] 跑过全量 eval，知道 pass/fail 含义
 - [ ] 会用 `task:replay` 排查失败 task
-- [ ] 知道 TokenHub：`hy3-preview` + `tokenhub.tencentmaas.com/v1` + TokenHub Key 三者配套
+- [ ] 知道 TokenHub：当前学习用 `minimax-m2.5` + `tokenhub.tencentmaas.com/v1` + TokenHub Key 三者配套；M2.x thinking 不能关闭，客户端会拆分 reasoning
 - [ ] 知道调试用 F5 时必须看到 `HTTP server started`
 - [ ] （可选）读过 `postgres-memory-store.ts` 五个核心方法
 
@@ -559,7 +559,7 @@ curl -s http://127.0.0.1:3000/health | jq .
 TokenHub Key 与旧混元 Key 不通用。检查 `apps/api/.env`：
 
 ```bash
-HUNYUAN_MODEL=hy3-preview
+HUNYUAN_MODEL=minimax-m2.5
 HUNYUAN_BASE_URL=https://tokenhub.tencentmaas.com/v1
 HUNYUAN_API_KEY=<TokenHub 控制台创建的 Key>
 ```

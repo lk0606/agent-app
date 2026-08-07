@@ -14,12 +14,15 @@
  * E.11：安全 case 须打到 Tool enforce（expectedTools + expectedErrorCode），
  * 不能只靠模型口头拒绝；口头拒绝会 fail 在「Expected tool was not used」。
  * E.12：expectedRoutedAgent 断言 plannerTrace 存在 outcome=routed 且 toolName=专家 id。
+ * E.12.x：expectedEscalationToGeneral 断言至少发生一次受限专家升级，且随后由 Supervisor 改派 general；
+ * 升级次数与重复升级不由该字段计数。
  *
  * CLI 示例：
  *   pnpm run evals:run
  *   pnpm run evals:run -- --id blocked-write-traversal
  *   pnpm run evals:run -- --id=search-docs-city-zh
  *   pnpm run evals:run -- --id multi-route-docs
+ *   pnpm run evals:run -- --id multi-escalate-files-to-general
  *   pnpm run evals:run -- evals/cases/basic-agent-cases.json --id search-docs-city
  *
  * 用例增多、拆多文件时的策略见 docs/evals-and-replay.md §用例组织策略。
@@ -72,6 +75,11 @@ interface EvalCase {
    * 须配合 requiresOrchestration: ["supervisor"]，single 模式下无 routed 步。
    */
   expectedRoutedAgent?: "docs" | "files" | "general";
+  /**
+   * E.12.x：断言 trace 至少存在一次 escalated/general，且其后存在 routed/general。
+   * 例：files 缺 time → 升级 general；该字段不计数升级次数，禁止 general 再升级由 Supervisor 运行时规则负责。
+   */
+  expectedEscalationToGeneral?: boolean;
   /** 仅当 AGENT_ORCHESTRATION 为所列值之一时才跑（如 multi-route-* 仅 supervisor） */
   requiresOrchestration?: Array<"supervisor" | "single">;
 }
@@ -377,6 +385,7 @@ async function loadToolCallsFromDb(
  * [4] 按 case 字段断言；安全 case 同时要有 expectedTools + expectedErrorCode，
  * 以证明打到了 Tool enforce（而非模型口头拒绝后 task 仍 succeeded）。
  * E.12：expectedRoutedAgent → plannerTrace 须有 outcome=routed 且 toolName 匹配。
+ * E.12.x：expectedEscalationToGeneral → escalated/general 后须有更高 step 的 routed/general。
  */
 function evaluateCase(
   testCase: EvalCase,
@@ -412,6 +421,23 @@ function evaluateCase(
         .join(", ");
       failures.push(
         `Expected routed agent "${testCase.expectedRoutedAgent}" but plannerTrace routed toolName(s): ${routedSeen || "(none)"}.`,
+      );
+    }
+  }
+
+  if (testCase.expectedEscalationToGeneral) {
+    const escalatedAt = plannerSteps.findIndex(
+      (step) => step.outcome === "escalated" && step.toolName === "general",
+    );
+    // 未找到升级时 slice(0) 可能含初始 routed/general；下方仍以 escalatedAt < 0 强制失败。
+    // 找到升级后才只检查其后的二次分诊，避免初始路由正好是 general 时出现假阳性。
+    const reroutedToGeneral = plannerSteps.slice(escalatedAt + 1).some(
+      (step) => step.outcome === "routed" && step.toolName === "general",
+    );
+
+    if (escalatedAt < 0 || !reroutedToGeneral) {
+      failures.push(
+        "Expected escalation to general: plannerTrace must contain escalated/general followed by routed/general.",
       );
     }
   }

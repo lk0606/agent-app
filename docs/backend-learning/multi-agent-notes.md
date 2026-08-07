@@ -43,21 +43,33 @@ E.12 把决策拆成两层：
 | | `AGENT_ORCHESTRATION=single` | `supervisor`（默认） |
 |--|------------------------------|----------------------|
 | 顶层 `agent` | `PlannerAgent` | `SupervisorAgent` |
-| `plannerTrace[0]` | 通常直接 `tool_executed` / `direct_answer` | **`outcome=routed`**，`toolName`=`docs\|files\|general` |
+| `plannerTrace[0]` | 通常直接 `tool_executed` / `direct_answer` | **`outcome=routed`**，`toolName`=`docs\|files\|general`；受限专家还可写 `escalated/general` |
 | 真实工具步 | 从 step 1 起 | 从 **step 2** 起（`stepOffset=1`） |
 | 多一次 LLM | 无 | `purpose=route`（计入 `metrics.llmCallCount`） |
 
-## 误路由与本版边界
+## 专家升级：受限工具箱不够时怎么办
 
-`docs` 与 `files` 会重叠（都要碰文件）。本版是 **route-once**：分错了**不会**运行中热转到另一专家。
+这里的“升级”是：`docs` 或 `files` 专家需要自己工具箱外的能力时，改派给 `general`。它不是业务工具调用，也不会产生 `tool_calls`。
 
-缓冲：
+本版规则：
 
-1. 拿不准 → `general`
-2. 路由 prompt 写互斥规则
-3. `plannerTrace` 可观测分错了
+1. 只允许 `docs/files → general`，不支持任意专家互转。
+2. 每个任务最多升级一次；`general` 已有全量工具，不能再次升级，避免路由循环。
+3. 升级后 `general` 可在工具预算内继续规划剩余步骤。
+4. 后端支持三种升级触发形态：模型显式选择 `escalate_to_general`；模型选了“当前子集没有、但 general 有”的业务工具；或用户直接点名了仅 general 有的工具。后两种由 Planner 自动升级，避免模型漏选内部 function 或误调别的工具后失败。
+5. 用户若直接按顺序点名工具，连续规划下一轮只向模型暴露尚未完成的一项；例如 `time → write_file` 中 `time` 成功后，本轮只提供 `write_file`。这是因为 TokenHub 模型只支持 `tool_choice="auto"`，不能指定某个 function。重复工具排除仍是模型未按要求执行时的兜底。
 
-后期（E.12.x）才做 handoff / 升级 general。详见进度文档与计划。
+示例：用户要求“先调用 `time`，再调用 `write_file` 写入沙箱文件”。初始路由因写文件进入 `files`；`files` 没有 `time`，请求升级；`general` 先只看到 `time`，成功后只看到 `write_file`。若模型仍返回重复工具，Planner 也会排除它后再规划。
+
+`plannerTrace` 会留下三条控制记录：
+
+```text
+routed/files → escalated/general → routed/general
+```
+
+- `escalated/general`：受限专家提出升级请求；
+- 后面的 `routed/general`：Supervisor 接受请求并实际改派；
+- 两者之间没有名为 `general` 的真实工具调用。
 
 ## 环境开关
 
@@ -91,6 +103,7 @@ pnpm run check:all
 pnpm run evals:run -- --id multi-route-docs
 pnpm run evals:run -- --id multi-route-files
 pnpm run evals:run -- --id multi-route-general
+pnpm run evals:run -- --id multi-escalate-files-to-general
 ```
 
 | case | 路由算对 | 工具算对 | 回答算对 |
@@ -98,12 +111,14 @@ pnpm run evals:run -- --id multi-route-general
 | `multi-route-docs` | `expectedRoutedAgent=docs` | 用了 `search_docs` | summary 含 `Taipei` |
 | `multi-route-files` | `files` | 用了 `list_dir` | summary 含 `sample-notes.txt` |
 | `multi-route-general` | `general` | 用了 `time` | （无强制关键词） |
+| `multi-escalate-files-to-general` | `files → general` | `time → write_file` | 时间已写入 `handoff-time.txt` |
 
 **算对（每条）：**
 
 1. 报告里 `"passed": true`，`"failures": []`
 2. 日志有 `Supervisor routed to specialist` 且 `specialistId` 与上表一致
 3. 断言层：`plannerTrace` 存在 `outcome=routed` 且 `toolName` = 期望专家（由 `run-evals` 自动查 DB）
+4. 升级 case 还要求 `escalated/general` 后紧跟更高 step 的 `routed/general`；`general` 不可再次升级
 
 **不算对的典型 fail：**
 
@@ -112,6 +127,7 @@ pnpm run evals:run -- --id multi-route-general
 | `Expected routed agent "docs" but … general` | 分诊偏保守/文案不够硬 | 强化 case 文案或路由 prompt |
 | `Expected tool "search_docs" was not used` | 专家对了但没调工具 | 看 `plannerTrace` 后续步 |
 | `Forbidden tool … was used` | 调了不该出现的工具 | 查专家子集是否装错 |
+| `Expected one escalation to general …` | 专家没请求升级，或 Supervisor 没完成二次路由 | 对照 `plannerTrace` 的 `escalated` / `routed` 顺序 |
 
 ### C. 用 replay 肉眼验收（推荐每条 eval 后做一次）
 
@@ -122,18 +138,21 @@ pnpm run evals:run -- --id multi-route-general
 pnpm run task:replay -- eval-multi-route-docs-<时间戳>
 ```
 
-**算对（docs 例）：**
+**算对（升级例）：**
 
 ```json
 "plannerTrace": [
-  { "step": 1, "outcome": "routed", "tool_name": "docs" },
-  { "step": 2, "outcome": "tool_executed", "tool_name": "search_docs" }
+  { "step": 1, "outcome": "routed", "tool_name": "files" },
+  { "step": 2, "outcome": "escalated", "tool_name": "general" },
+  { "step": 3, "outcome": "routed", "tool_name": "general" },
+  { "step": 4, "outcome": "tool_executed", "tool_name": "time" },
+  { "step": 5, "outcome": "tool_executed", "tool_name": "write_file" }
 ]
 ```
 
-- step 1：**只有** `routed`，没有对应 `tool_calls` 行叫 `docs`
-- step 2：才有真实 `tool_calls`（如 `search_docs`）
-- `metrics.llm_call_count` ≥ 3（route + plan + answer）；`llm_calls` 里应有 `purpose: "route"`
+- step 1 / 3 是 Supervisor 的路由决定；step 2 是专家的升级请求，三者都没有对应 `tool_calls`
+- step 4 / 5 才有真实 `tool_calls`
+- `metrics.llm_call_count` ≥ 4（route + 受限专家 plan + general plan + answer）；`llm_calls` 里应有 `purpose: "route"`
 
 ### D. 可选：HTTP 手测
 
@@ -155,7 +174,7 @@ curl -s "http://127.0.0.1:3000/tasks/$TASK_ID" | jq '.plannerTrace[0], .toolCall
 pnpm run evals:run
 ```
 
-**算对：** `failed: 0`。keyword 模式下约 **28** 条（跳过 `search-docs-city-zh`；含 3 条 multi-route）。  
+**算对：** `failed: 0`。keyword 模式下约 **29** 条（跳过 `search-docs-city-zh`；含 3 条路由 + 1 条升级 case）。
 旧 case 若偶发因误路由变差：先 `task:replay`；拿不准应落 `general`，一般仍有全量工具可用。
 
 ### F. 对照实验（可选）
@@ -173,10 +192,10 @@ AGENT_ORCHESTRATION=single pnpm run evals:run -- --id multi-route-docs
 
 | 顺序 | 文件 | 看什么 |
 |------|------|--------|
-| 1 | `agents/supervisor-agent.ts` | 路由 → 落 `routed` → 委托 Planner |
-| 2 | `llm/hunyuan-llm-client.ts` `routeSpecialty` | 分诊 prompt 与 `plan` 分离 |
-| 3 | `app/create-agent-runtime.ts` | 专家工具子集 + `AGENT_ORCHESTRATION` |
-| 4 | `agents/planner-agent.ts` | `stepOffset` |
-| 5 | `scripts/run-evals.ts` | `expectedRoutedAgent` / `requiresOrchestration` |
+| 1 | `agents/supervisor-agent.ts` | 初次路由、捕获升级、二次路由 general |
+| 2 | `agents/planner-agent.ts` | 升级控制信号、`stepOffset`、general 连续规划 |
+| 3 | `llm/hunyuan-llm-client.ts` | 分诊 prompt、`escalate_to_general` function |
+| 4 | `app/create-agent-runtime.ts` | 专家工具子集 + `AGENT_ORCHESTRATION` |
+| 5 | `scripts/run-evals.ts` | `expectedRoutedAgent` / `expectedEscalationToGeneral` |
 
-心智模型：`分诊 LLM → routed 可观测 → 专家小工具箱跑 plan → 旧 eval 仍尽量绿`。
+心智模型：`分诊 LLM → routed → 受限专家请求升级 → escalated → Supervisor 改派 general → 全量工具继续 plan`。

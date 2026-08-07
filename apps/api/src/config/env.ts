@@ -83,8 +83,8 @@ export function loadConfig(): AppConfig {
     appName: process.env.APP_NAME ?? "agent-app",
     nodeEnv: process.env.NODE_ENV ?? "development",
     hunyuanApiKey,
-    // 默认走 TokenHub；旧 api.hunyuan.cloud.tencent.com 的 turbos/t1 已下线，Key 也不通用
-    hunyuanModel: process.env.HUNYUAN_MODEL ?? "hy3-preview",
+    // 学习期按能力排序倒序试用免费额度；MiniMax M2.5 支持 Function Calling，兼容处理见 HunyuanLlmClient。
+    hunyuanModel: process.env.HUNYUAN_MODEL ?? "minimax-m2.5",
     hunyuanBaseUrl: process.env.HUNYUAN_BASE_URL ?? "https://tokenhub.tencentmaas.com/v1",
     databaseUrl,
     agentMaxSteps: readNumber("AGENT_MAX_STEPS", 3),

@@ -4,4 +4,6 @@ apps/api/dist
 .env
 .pnpm-store
 apps/api/evals/reports/*
+# multi-escalate-files-to-general 写入的运行产物；下次 eval 会重新生成，不是测试夹具。
+apps/api/evals/fixtures/handoff-time.txt
 *.DS_Store
