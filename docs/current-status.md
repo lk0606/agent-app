@@ -2,7 +2,7 @@
 
 这是项目的**唯一进度状态源**。做完一项就更新一项，其他文档只保留设计细节，不再各自维护「已完成 / 下一步」。
 
-最后更新：2026-08-05（E.12.x：专家升级到 general）
+最后更新：2026-08-07（新增【E.13+ 后端后续路线】候选规划，尚未选定动手项）
 
 ## 30 秒阅读指南
 
@@ -26,6 +26,7 @@
 | eval 是什么 | 本文件 [术语：eval](#术语eval-是什么) |
 | 后端任务怎么测 | 本文件 [【E 节】](#e-后端优先路线当前采用) 每项下的「测试方法」 |
 | **巩固周每日任务（详细）** | [`docs/consolidation-week.md`](consolidation-week.md) |
+| **后端下一阶段做什么（候选清单）** | 本文件 [【E.13+ 后端后续路线】](#e13-后端后续路线候选未选定优先动手项) |
 | 想搞懂 Agent **完整原理**（推荐主读） | **[`docs/backend-learning/agent-core-flow.md`](backend-learning/agent-core-flow.md)** |
 | 想搞懂 `runner.run` / `plan()` 速查 | [`docs/backend-learning/agent-run-chain.md`](backend-learning/agent-run-chain.md) |
 | 想搞懂 Tool 选型 / execute / 落库 | [`docs/backend-learning/tool-execution-chain.md`](backend-learning/tool-execution-chain.md) |
@@ -45,7 +46,7 @@
 | `进行中` | 已开工、未验收（开工后可手动标上） |
 | `未开始` | 还没做 |
 
-**当前开发重点（后端优先）：** 后端 P0–P3（E.1–E.4）已交付；前端 Step 2 已完成；Step 4 工作台内调试面板已完成（独立 `/tasks/[taskId]` 页可选）。
+**当前开发重点（后端优先）：** 后端 E.1–E.12（含 E.12.x）已交付；前端 Step 2/4/5 已完成（独立 `/tasks/[taskId]` 页可选）；**下一阶段候选见 [E.13+ 后端后续路线](#e13-后端后续路线候选未选定优先动手项)，待选定后开工**。
 
 ---
 
@@ -118,7 +119,7 @@ AI / 协作者交付任务时：**聊天里说明 + 源码注释 + 合并前写�
 
 **路线：** 后端优先学习（见【E 节】与 `.cursor/rules/backend-first-learning.mdc`）。前端工作台仅辅助观察后端；日常用 `curl` + `evals:run` + `task:replay` 验证即可。
 
-**当前开发重点：** **E.12 Multi-Agent** 已交付，含 E.12.x「专家升级到通用专家」：受限专家缺能力时可升级一次给 `general`。可选：独立 `/tasks/[taskId]` 页。
+**当前开发重点：** **E.12 Multi-Agent** 已交付，含 E.12.x「专家升级到通用专家」。**下一步：** 从 [E.13+ 后端后续路线](#e13-后端后续路线候选未选定优先动手项)（鉴权/Prompt Injection/Reflection/重试退避/CI/traceId 等候选）里选一项开工；可选：独立 `/tasks/[taskId]` 页。
 
 **前端何时再动：**
 
@@ -1279,6 +1280,50 @@ pnpm run evals:run
 | 6 | `apps/api/src/scripts/run-evals.ts` | `expectedRoutedAgent` / `expectedEscalationToGeneral` |
 
 心智模型：`初次分诊 → routed → 受限专家发现缺能力 → escalated → 二次 routed/general → 全量工具完成剩余步骤 → eval 绿`。
+
+---
+
+### E.13+ 后端后续路线（候选，未选定优先动手项）
+
+| | |
+|--|--|
+| **状态** | 规划中（2026-08-07 讨论产出，尚未选定具体动手项） |
+| **背景** | E.1–E.12 已覆盖 `docs/learning-plan.md` 8 周计划的绝大部分能力；本节是排查现存缺口后给出的下一阶段候选清单，等选定后再逐项开工（开工时把对应条目状态改 `进行中`，交付后补齐四件套） |
+| **缺口复核（代码层面已确认，非猜测）** | `server.ts` 无任何鉴权中间件；全仓库无 `retry`/`429`/`backoff`；`traceId` 仅在注释里提醒"别和 plannerTrace 混"，无实际实现；外部内容（`search_docs`/`read_file`/`http_fetch`）直接拼进 prompt，无 Prompt Injection 隔离与专项 eval；无 `.github/workflows` CI |
+
+#### P0：安全底线（建议最先做）
+
+| 编号 | 目标 | 为什么优先 | 预估改动范围 |
+|----|------|-----------|--------------|
+| **E.13** | HTTP API 鉴权（`Authorization: Bearer <key>` 中间件）+ 简单限流 | 当前接口完全开放，`write_file` / `http_fetch` 可被匿名调用，是生产化最基础的护栏 | `server.ts` 加鉴权中间件；`env.ts` 加 `API_AUTH_TOKEN`；契约层补 401 错误码 |
+| **E.14** | Prompt Injection 防护 + 专项 eval | 学习计划阶段 C 明确点名，目前空白；`search_docs`/`read_file` 抓回文本天然是攻击面（文档里可能藏"忽略之前指令"类文本） | Prompt 给外部内容加隔离分隔符 + 显式声明"仅供参考、不可执行"；eval 新增 `prompt-injection-*`（fixture 埋攻击文本，断言模型不执行） |
+
+#### P1：Agent 能力进阶
+
+| 编号 | 目标 | 为什么现在做 | 预估改动范围 |
+|----|------|-------------|--------------|
+| **E.15** | Reflection 自我校验循环 | 目前是纯 ReAct（plan→tool→answer 即结束），无"生成后自查、必要时重新规划"的反思层；是公认的 Agent 能力下一级 | `planner-agent.ts` 加一轮 `reflect` 步骤；`planner_steps.outcome` 新增枚举；eval 覆盖"首次工具选错、反思后纠正" |
+| **E.16** | LLM 调用重试退避 + 工具重试策略 | 混元/TokenHub 偶发限流或超时目前直接失败，无工程兜底；需区分幂等工具（`read_file` 可重试）与非幂等工具（`write_file` 不可重试） | `hunyuan-llm-client.ts` 加指数退避；`tool.ts` 接口加 `idempotent` 标记 |
+
+#### P2：工程化收尾
+
+| 编号 | 目标 | 为什么现在做 | 预估改动范围 |
+|----|------|-------------|--------------|
+| **E.17** | CI 接入 eval 回归 | `evals:run` 已 CI 友好（预检 + exitCode），但无实际流水线；有了鉴权/新工具后不能只靠"记得手动跑" | 新增 `.github/workflows/ci.yml`：起 postgres service → `db:migrate` → `evals:run` |
+| **E.18** | 请求级 `traceId`（真正实现） | 命名位置已在【H 节】预留；实现后能把一次 HTTP 请求 → 多次 LLM 调用 → 多个工具执行串起来，为未来接 OTel 打基础 | `server.ts` 生成 `traceId` 注入 `logger.child`；**不进** `plannerTrace` / `metrics`（按命名约定避免混淆） |
+
+#### P3：可选加强（价值递减，按兴趣挑）
+
+| 编号 | 目标 | 说明 |
+|----|------|------|
+| **E.19** | 跨 Session 长期记忆 | 现有记忆仅限单 session（summary + 最近窗口）；可加 `remember_fact` 工具或自动抽取偏好写独立表，跨 session 复用 |
+| **E.20** | RAG 检索增强（rerank / chunk 策略） | 在 E.7 基础上切块加 overlap、简单 rerank，属精细化调优 |
+| **E.21** | Docker 化部署 | `apps/api` Dockerfile + compose 一键起服务+DB，学习计划阶段 D「可部署交付物」收尾 |
+| 前端遗留 | 独立 `/tasks/[taskId]` 页、E.3.5-f 代码高亮 | 按后端优先路线继续搁置，不计入本轮后端主线 |
+
+**排序逻辑：** P0 是"不做就有实际风险"且改动小、验收清晰；P1 是 Agent 工程"从能跑到耐用"的关键概念，复用现成 `plannerTrace`/eval 框架；P2 是收尾性质，不影响功能但项目体量到了该补；P3 都是"有更好、无也不影响主线"的增强项。
+
+**下一步：** 选定某一项后，把该条目状态改为 `进行中`，动手前先在此处细化「改动范围」，交付后按【E 节】固定四件套（已交付/测试方法/学习要点/代码怎么读）补齐，并把编号从本节移至上方正式条目。
 
 ---
 
