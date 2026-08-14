@@ -61,6 +61,16 @@ export interface AppConfig {
    * - single：直接 Planner + 全量工具（与 E.11 前行为一致，便于对比/救急）
    */
   agentOrchestration: "supervisor" | "single";
+  /**
+   * E.14：外部工具输出进 LLM prompt 前是否加隔离包装。
+   * 默认 true；设 false 可裸拼对照验证（同模型同 fixture 应更容易中招）。
+   */
+  promptInjectionGuard: boolean;
+  /**
+   * E.14 学习期观测：打印「工具原文 → 隔离包装后」的前后形态（含 BEGIN/END 头尾）。
+   * 默认 false；只影响日志，不改 prompt 内容。日志较长，别在压测/长文档时开。
+   */
+  promptInjectionGuardDebug: boolean;
   port: number;
   /**
    * E.13：HTTP 接口鉴权 token；null = 未设置，鉴权关闭（仅限本地学习环境，server.ts 启动时会 warn 提醒）。
@@ -129,6 +139,10 @@ export function loadConfig(): AppConfig {
     confirmationAutoApprove: readBoolean("CONFIRMATION_AUTO_APPROVE", false),
     // E.12：默认走 Supervisor；设 single 可对比单 Agent / 救急绕过路由
     agentOrchestration: readAgentOrchestration(process.env.AGENT_ORCHESTRATION),
+    // E.14：默认开启隔离包装；false 时工具输出裸拼进 prompt，便于 A/B 中招对照
+    promptInjectionGuard: readBoolean("PROMPT_INJECTION_GUARD", true),
+    // 学习期才开：日志里能看到包装前后两段文本，确认「什么时候转、转成什么」
+    promptInjectionGuardDebug: readBoolean("PROMPT_INJECTION_GUARD_DEBUG", false),
     port: readNumber("PORT", 3000),
     // E.13：未设置 = 空字符串/undefined 都视为「关闭鉴权」，与 agentTaskTimeoutMs 的「未配置=关闭」同一约定
     apiAuthToken: process.env.API_AUTH_TOKEN?.trim() ? process.env.API_AUTH_TOKEN.trim() : null,

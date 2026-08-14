@@ -37,6 +37,12 @@ export function createAgentRuntime(config: AppConfig) {
     apiKey: config.hunyuanApiKey,
     model: config.hunyuanModel,
     baseURL: config.hunyuanBaseUrl,
+    // E.14：默认 true；PROMPT_INJECTION_GUARD=false 时裸拼，便于对照
+    promptInjectionGuard: config.promptInjectionGuard,
+    // 学习期：拼 prompt 时打 log（changed / 前后字符数）
+    logger,
+    // PROMPT_INJECTION_GUARD_DEBUG=true 时日志再附「包装前 / 包装后」文本片段
+    promptInjectionGuardDebug: config.promptInjectionGuardDebug,
   });
   const embeddingClient =
     config.searchDocsMode === "keyword"
