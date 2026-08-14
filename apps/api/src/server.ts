@@ -8,6 +8,9 @@
  * 4. 健康检查：GET /health
  *
  * 编排链：本文件 → prepareAgentRun → TaskRunner → SupervisorAgent(可选) / PlannerAgent → LlmClient / Tools → MemoryStore(Postgres)
+ *
+ * E.13：除 /health 外的所有路由先过 rate-limiter（按 IP 计数）再过 auth.ts（Bearer token）；
+ * 两者都是进程内状态，鉴权 token 未配置时视为学习环境显式关闭（详见 config/env.ts apiAuthToken 注释）。
  */
 import "dotenv/config";
 
@@ -21,9 +24,11 @@ import { createServer } from "node:http";
 
 import { createAgentRuntime } from "./app/create-agent-runtime.js";
 import { loadConfig } from "./config/env.js";
+import { requireApiAuth } from "./http/auth.js";
 import { getPathSegments, readJsonBody } from "./http/http-request.js";
 import { buildErrorPayload, HTTP_STATUS, statusForError, writeJson } from "./http/http-response.js";
 import { prepareAgentRun } from "./http/prepare-agent-run.js";
+import { RateLimiter } from "./http/rate-limiter.js";
 import { endSseResponse, initSseResponse, writeSseEvent } from "./http/sse-response.js";
 import { parseSchema } from "./http/validation.js";
 import { AppError, classifyError } from "./shared/app-error.js";
@@ -31,6 +36,12 @@ import { AppError, classifyError } from "./shared/app-error.js";
 async function main(): Promise<void> {
   const config = loadConfig();
   const { runner, logger, memory, pool, runningTasks, confirmations } = createAgentRuntime(config);
+  const rateLimiter = new RateLimiter(config.rateLimitWindowMs, config.rateLimitMaxRequests);
+
+  // E.13：这是保护本服务对外接口的开关，未设置时明确 warn——不要和 dev 惯性下的“反正本地跑”混淆
+  if (config.apiAuthToken === null) {
+    logger.error("API_AUTH_TOKEN is not set — all HTTP endpoints are unauthenticated (local learning use only).");
+  }
 
   const server = createServer(async (req, res) => {
     try {
@@ -47,6 +58,11 @@ async function main(): Promise<void> {
         writeJson(res, HTTP_STATUS.ok, { ok: true, time: new Date().toISOString() });
         return;
       }
+
+      // E.13：健康检查之外的所有接口都要过限流 + 鉴权；顺序故意先限流再鉴权——
+      // 避免无 token 的暴力尝试也能无限占用请求处理（限流以 IP 计数，鉴权失败一样计数）
+      rateLimiter.check(req.socket.remoteAddress ?? "unknown");
+      requireApiAuth(req, config.apiAuthToken);
 
       // --- Agent 执行（同步 JSON vs SSE 流式，共用 prepareAgentRun 建 session/task）---
       if (req.method === "POST" && requestUrl.pathname === "/agent/run") {
@@ -351,6 +367,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
     logger.info("Shutting down HTTP server", { signal });
 
+    rateLimiter.dispose();
     server.closeAllConnections?.();
 
     const finish = () => {

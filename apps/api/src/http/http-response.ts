@@ -37,9 +37,11 @@ export const HTTP_STATUS = {
   ok: 200,
   noContent: 204,
   badRequest: 400,
+  unauthorized: 401,
   notFound: 404,
   requestTimeout: 408,
   conflict: 409,
+  tooManyRequests: 429,
   internalServerError: 500,
 } as const;
 
@@ -47,12 +49,16 @@ export function statusForError(code: AppError["code"]): number {
   switch (code) {
     case "BAD_REQUEST":
       return HTTP_STATUS.badRequest;
+    case "UNAUTHORIZED":
+      return HTTP_STATUS.unauthorized;
     case "NOT_FOUND":
       return HTTP_STATUS.notFound;
     case "TIMEOUT_ERROR":
       return HTTP_STATUS.requestTimeout;
     case "CANCELLED":
       return HTTP_STATUS.conflict;
+    case "RATE_LIMITED":
+      return HTTP_STATUS.tooManyRequests;
     default:
       return HTTP_STATUS.internalServerError;
   }

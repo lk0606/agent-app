@@ -62,6 +62,14 @@ export interface AppConfig {
    */
   agentOrchestration: "supervisor" | "single";
   port: number;
+  /**
+   * E.13：HTTP 接口鉴权 token；null = 未设置，鉴权关闭（仅限本地学习环境，server.ts 启动时会 warn 提醒）。
+   * 与 HUNYUAN_API_KEY 无关——这是保护本服务对外接口，不是调上游 LLM 的凭证。
+   */
+  apiAuthToken: string | null;
+  /** E.13：限流窗口（ms）与窗口内最大请求数，按客户端 IP 计数；健康检查 /health 不计入 */
+  rateLimitWindowMs: number;
+  rateLimitMaxRequests: number;
 }
 
 export function loadConfig(): AppConfig {
@@ -122,6 +130,10 @@ export function loadConfig(): AppConfig {
     // E.12：默认走 Supervisor；设 single 可对比单 Agent / 救急绕过路由
     agentOrchestration: readAgentOrchestration(process.env.AGENT_ORCHESTRATION),
     port: readNumber("PORT", 3000),
+    // E.13：未设置 = 空字符串/undefined 都视为「关闭鉴权」，与 agentTaskTimeoutMs 的「未配置=关闭」同一约定
+    apiAuthToken: process.env.API_AUTH_TOKEN?.trim() ? process.env.API_AUTH_TOKEN.trim() : null,
+    rateLimitWindowMs: readNumber("RATE_LIMIT_WINDOW_MS", 60_000),
+    rateLimitMaxRequests: readNumber("RATE_LIMIT_MAX_REQUESTS", 60),
   };
 }
 

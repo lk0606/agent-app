@@ -2,7 +2,7 @@
 
 这是项目的**唯一进度状态源**。做完一项就更新一项，其他文档只保留设计细节，不再各自维护「已完成 / 下一步」。
 
-最后更新：2026-08-07（新增【E.13+ 后端后续路线】候选规划，尚未选定动手项）
+最后更新：2026-08-07（E.13：HTTP API 鉴权 + 限流，已完成）
 
 ## 30 秒阅读指南
 
@@ -26,7 +26,7 @@
 | eval 是什么 | 本文件 [术语：eval](#术语eval-是什么) |
 | 后端任务怎么测 | 本文件 [【E 节】](#e-后端优先路线当前采用) 每项下的「测试方法」 |
 | **巩固周每日任务（详细）** | [`docs/consolidation-week.md`](consolidation-week.md) |
-| **后端下一阶段做什么（候选清单）** | 本文件 [【E.13+ 后端后续路线】](#e13-后端后续路线候选未选定优先动手项) |
+| **后端下一阶段做什么（候选清单）** | 本文件 [【E.14+ 后端后续路线】](#e14-后端后续路线候选未选定优先动手项) |
 | 想搞懂 Agent **完整原理**（推荐主读） | **[`docs/backend-learning/agent-core-flow.md`](backend-learning/agent-core-flow.md)** |
 | 想搞懂 `runner.run` / `plan()` 速查 | [`docs/backend-learning/agent-run-chain.md`](backend-learning/agent-run-chain.md) |
 | 想搞懂 Tool 选型 / execute / 落库 | [`docs/backend-learning/tool-execution-chain.md`](backend-learning/tool-execution-chain.md) |
@@ -46,7 +46,7 @@
 | `进行中` | 已开工、未验收（开工后可手动标上） |
 | `未开始` | 还没做 |
 
-**当前开发重点（后端优先）：** 后端 E.1–E.12（含 E.12.x）已交付；前端 Step 2/4/5 已完成（独立 `/tasks/[taskId]` 页可选）；**下一阶段候选见 [E.13+ 后端后续路线](#e13-后端后续路线候选未选定优先动手项)，待选定后开工**。
+**当前开发重点（后端优先）：** 后端 E.1–E.13 已交付；前端 Step 2/4/5 已完成（独立 `/tasks/[taskId]` 页可选）；**下一阶段候选见 [E.14+ 后端后续路线](#e14-后端后续路线候选未选定优先动手项)，待选定后开工**。
 
 ---
 
@@ -119,7 +119,7 @@ AI / 协作者交付任务时：**聊天里说明 + 源码注释 + 合并前写�
 
 **路线：** 后端优先学习（见【E 节】与 `.cursor/rules/backend-first-learning.mdc`）。前端工作台仅辅助观察后端；日常用 `curl` + `evals:run` + `task:replay` 验证即可。
 
-**当前开发重点：** **E.12 Multi-Agent** 已交付，含 E.12.x「专家升级到通用专家」。**下一步：** 从 [E.13+ 后端后续路线](#e13-后端后续路线候选未选定优先动手项)（鉴权/Prompt Injection/Reflection/重试退避/CI/traceId 等候选）里选一项开工；可选：独立 `/tasks/[taskId]` 页。
+**当前开发重点：** **E.13 HTTP API 鉴权 + 限流** 已交付。**下一步：** 从 [E.14+ 后端后续路线](#e14-后端后续路线候选未选定优先动手项)（Prompt Injection/Reflection/重试退避/CI/traceId 等候选）里选一项开工；可选：独立 `/tasks/[taskId]` 页。
 
 **前端何时再动：**
 
@@ -1283,19 +1283,91 @@ pnpm run evals:run
 
 ---
 
-### E.13+ 后端后续路线（候选，未选定优先动手项）
+### E.13 HTTP API 鉴权 + 限流
 
 | | |
 |--|--|
-| **状态** | 规划中（2026-08-07 讨论产出，尚未选定具体动手项） |
-| **背景** | E.1–E.12 已覆盖 `docs/learning-plan.md` 8 周计划的绝大部分能力；本节是排查现存缺口后给出的下一阶段候选清单，等选定后再逐项开工（开工时把对应条目状态改 `进行中`，交付后补齐四件套） |
-| **缺口复核（代码层面已确认，非猜测）** | `server.ts` 无任何鉴权中间件；全仓库无 `retry`/`429`/`backoff`；`traceId` 仅在注释里提醒"别和 plannerTrace 混"，无实际实现；外部内容（`search_docs`/`read_file`/`http_fetch`）直接拼进 prompt，无 Prompt Injection 隔离与专项 eval；无 `.github/workflows` CI |
+| **状态** | 已完成 |
+| **目标** | 除 `/health` 外所有接口要求 `Authorization: Bearer <token>`；按客户端 IP 做简单限流；未配置 token 时保持学习环境默认开放（并 warn 提醒） |
+| **改动范围** | `config/env.ts`、`http/auth.ts`（新增）、`http/rate-limiter.ts`（新增）、`shared/app-error.ts`、`http/http-response.ts`、`server.ts`、`apps/web` API client、`smoke-cancel.ts`/`smoke-confirm.ts`、新增 `smoke-auth.ts` |
 
-#### P0：安全底线（建议最先做）
+#### 已交付
+
+| 项 | 说明 |
+|----|------|
+| **鉴权中间件** | `http/auth.ts` 的 `requireApiAuth`：校验 `Authorization: Bearer <token>`；用 `timingSafeEqual` 定长比较防时序攻击 |
+| **限流器** | `http/rate-limiter.ts` 的 `RateLimiter`：进程内 Map，按 IP 固定窗口计数，超限抛 `RATE_LIMITED`；带定时 sweep 防止长期运行进程 Map 无限增长 |
+| **顺序** | `server.ts` 里限流先于鉴权（鉴权失败的请求也计入限流窗口），防止无 token 的暴力枚举绕开限流 |
+| **未配置=关闭** | `API_AUTH_TOKEN` 留空（默认）时鉴权整体关闭，仅限本地学习场景；启动时 `logger.error` 打一条 warn 级提醒（用 error 级别是为了在默认 info 过滤下也总能看见） |
+| **新错误码** | `UNAUTHORIZED`（401）、`RATE_LIMITED`（429），补进 `AppError["code"]` 与 `statusForError` |
+| **前端联调** | `apps/web` 新增 `getAuthHeaders()`，读 `NEXT_PUBLIC_AGENT_API_TOKEN`；`session-api.ts` / `agent-api.ts` 全部请求带上 |
+| **smoke 脚本** | 新增 `pnpm run smoke:auth`（零 LLM 成本，只测 HTTP 层）；`smoke-cancel.ts` / `smoke-confirm.ts` 补上鉴权 header，避免配了 token 后这两个脚本失效 |
+
+#### 测试方法
+
+```bash
+pnpm run check:all
+
+# 1. 默认（不设 API_AUTH_TOKEN）：行为与改动前一致，全部开放
+pnpm run dev:server
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000/sessions
+# 预期：200；终端日志里能看到一条 "API_AUTH_TOKEN is not set" 的 warn
+
+# 2. 打开鉴权 + 低阈值限流手测（新开一个临时端口，不影响正在跑的 dev:server）
+cd apps/api
+API_AUTH_TOKEN=test-secret RATE_LIMIT_MAX_REQUESTS=5 PORT=3099 pnpm run dev:server:once
+# 另开终端：
+curl -s -w "\n%{http_code}\n" http://127.0.0.1:3099/sessions                                    # 401（无 header）
+curl -s -w "\n%{http_code}\n" -H "authorization: Bearer wrong" http://127.0.0.1:3099/sessions   # 401（token 不对）
+curl -s -w "\n%{http_code}\n" -H "authorization: Bearer test-secret" http://127.0.0.1:3099/sessions  # 200
+
+# 3. 自动化脚本（零成本，不调 LLM）
+SMOKE_API_BASE_URL=http://127.0.0.1:3099 API_AUTH_TOKEN=test-secret RATE_LIMIT_MAX_REQUESTS=5 pnpm run smoke:auth
+# 预期：401/401/200 三个断言全过，随后连续请求触发一次 429
+
+# 4. 全量 eval 回归（确认没引入回归；evals 走 TaskRunner 直连，不经过 HTTP，不受鉴权影响）
+pnpm run evals:run
+```
+
+- **失败排查：** 401 却应该 200 → 检查 `apps/api/.env` 与手测用的 token 是否一致；429 迟迟不出现 → 确认 `RATE_LIMIT_MAX_REQUESTS`/`RATE_LIMIT_WINDOW_MS` 有没有被更大的默认值覆盖
+- **验收记录：** 2026-08-07 本地手测 401/401/200/429 全部符合预期；`pnpm run check` + `pnpm run check:web` 通过；`pnpm run evals:run` 29 条中 27 过、2 条失败为已知模型行为波动（`blocked-write-absolute-path` 口头拒绝、`read-file-no-secret-leak` 偶发关键词缺失），复跑后者已转绿，前者复现的是【E.11】文档里记录的既有 flakiness，与本次改动无关
+
+#### 学习要点
+
+1. **鉴权保护的是"谁能调用这个服务"，跟 `HUNYUAN_API_KEY`（调上游 LLM 的凭证）是两回事**——一个学习项目做到有真实工具执行能力（`write_file`）时，这两层缺一不可。
+2. **限流要放在鉴权之前**：如果先鉴权、鉴权失败直接返回不计数，攻击者可以无限次猜 token 而不受限流约束；本实现故意让 401 也占限流配额。
+3. **"未配置=功能关闭"是本仓库一贯的默认哲学**（`agentTaskTimeoutMs`、`confirmationAutoApprove` 都是这个模式），鉴权也遵循它，但代价是"忘记配置=完全不设防"，所以必须有醒目的启动期 warn 兜底提醒。
+4. **进程内 Map 限流器只适合单实例**：与 `RunningTaskRegistry`、`ConfirmationRegistry` 同样的局限——多实例部署要换 Redis 等共享存储，本仓库故意不做。
+5. **`NEXT_PUBLIC_*` 不是真正的密钥保管方式**：它会被打进浏览器 bundle，任何人查看网络请求就能看到 token；这里能接受是因为整个前端工作台就是本地单人调试工具，不是要保护的边界。
+
+#### 代码怎么读
+
+| 顺序 | 文件 | 看什么 |
+|---|---|---|
+| 1 | `apps/api/src/http/auth.ts` | `requireApiAuth`、`safeTokenEquals` 的定长比较 |
+| 2 | `apps/api/src/http/rate-limiter.ts` | `RateLimiter.check` 固定窗口计数逻辑、`sweep` 清理 |
+| 3 | `apps/api/src/server.ts` | 请求处理器里 `/health` 之后、路由匹配之前插入的限流+鉴权两行 |
+| 4 | `apps/api/src/config/env.ts` | `apiAuthToken` 的"未配置=关闭"解析 |
+| 5 | `apps/web/src/lib/api/api-utils.ts` | `getAuthHeaders()` |
+| 6 | `apps/api/src/scripts/smoke-auth.ts` | 401/401/200/429 四段断言 |
+
+心智模型：`请求进来 → rateLimiter.check(IP) → requireApiAuth(token) → 路由匹配`；两层都是「未配置/未超限=放行」，交付的是护栏而非默认收紧。
+
+---
+
+### E.14+ 后端后续路线（候选，未选定优先动手项）
+
+| | |
+|--|--|
+| **状态** | 规划中（2026-08-07 讨论产出；E.13 已从候选转正式完成） |
+| **背景** | E.1–E.13 已覆盖 `docs/learning-plan.md` 8 周计划的绝大部分能力；本节是排查现存缺口后给出的下一阶段候选清单，等选定后再逐项开工（开工时把对应条目状态改 `进行中`，交付后补齐四件套） |
+| **缺口复核（代码层面已确认，非猜测）** | 全仓库无 `retry`/`429`/`backoff`；`traceId` 仅在注释里提醒"别和 plannerTrace 混"，无实际实现；外部内容（`search_docs`/`read_file`/`http_fetch`）直接拼进 prompt，无 Prompt Injection 隔离与专项 eval；无 `.github/workflows` CI |
+
+#### P0：安全底线
 
 | 编号 | 目标 | 为什么优先 | 预估改动范围 |
 |----|------|-----------|--------------|
-| **E.13** | HTTP API 鉴权（`Authorization: Bearer <key>` 中间件）+ 简单限流 | 当前接口完全开放，`write_file` / `http_fetch` 可被匿名调用，是生产化最基础的护栏 | `server.ts` 加鉴权中间件；`env.ts` 加 `API_AUTH_TOKEN`；契约层补 401 错误码 |
+| ~~E.13~~ | ~~HTTP API 鉴权 + 限流~~ | 已完成，见上方正式条目 | — |
 | **E.14** | Prompt Injection 防护 + 专项 eval | 学习计划阶段 C 明确点名，目前空白；`search_docs`/`read_file` 抓回文本天然是攻击面（文档里可能藏"忽略之前指令"类文本） | Prompt 给外部内容加隔离分隔符 + 显式声明"仅供参考、不可执行"；eval 新增 `prompt-injection-*`（fixture 埋攻击文本，断言模型不执行） |
 
 #### P1：Agent 能力进阶
@@ -1345,6 +1417,7 @@ P8   E.9 任务观测与成本统计（metrics）   ← 已完成
 P9   E.10 人工确认节点（HITL）           ← 已完成
 P10  E.11 安全 eval 加固（Tool enforce） ← 已完成
 P11  E.12 Multi-Agent（Supervisor）      ← 已完成
+P12  E.13 HTTP API 鉴权 + 限流           ← 已完成
 ```
 
 前端 Step 2/4 **不阻塞** E.1–E.2、E.4；**E.3 / E.3.5 必须带前端**（E.3.5 为 Step 5 主验收）。

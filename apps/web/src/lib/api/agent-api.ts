@@ -5,7 +5,7 @@ import {
   type RunAgentResponse,
 } from "@agent-app/api-contract";
 
-import { fetchJson, getApiBaseUrl, readErrorMessage } from "./api-utils";
+import { fetchJson, getApiBaseUrl, getAuthHeaders, readErrorMessage } from "./api-utils";
 import { readAgentStream } from "./sse-client";
 
 export async function runAgent(input: RunAgentRequest): Promise<RunAgentResponse> {
@@ -13,6 +13,7 @@ export async function runAgent(input: RunAgentRequest): Promise<RunAgentResponse
     method: "POST",
     headers: {
       "content-type": "application/json",
+      ...getAuthHeaders(),
     },
     body: JSON.stringify(input),
   });
@@ -29,6 +30,7 @@ export async function streamAgent(
     method: "POST",
     headers: {
       "content-type": "application/json",
+      ...getAuthHeaders(),
     },
     body: JSON.stringify(input),
   });

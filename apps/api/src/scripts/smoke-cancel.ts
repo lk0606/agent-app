@@ -7,13 +7,17 @@
 import "dotenv/config";
 
 const baseUrl = process.env.SMOKE_API_BASE_URL ?? "http://127.0.0.1:3000";
+// E.13：dev:server 若配了 API_AUTH_TOKEN，这里必须带同一个 token，否则全部请求 401
+const authHeaders: Record<string, string> = process.env.API_AUTH_TOKEN
+  ? { authorization: `Bearer ${process.env.API_AUTH_TOKEN}` }
+  : {};
 
 async function main(): Promise<void> {
   console.log(`Starting long wait via SSE at ${baseUrl} ...`);
 
   const response = await fetch(`${baseUrl}/agent/stream`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...authHeaders },
     body: JSON.stringify({
       input: "请务必调用 wait 工具等待 15 秒，等待结束后只回复「完成」。",
     }),
@@ -83,7 +87,10 @@ async function main(): Promise<void> {
         if (sawWaitStart && taskId && !cancelPosted) {
           cancelPosted = true;
           console.log("Posting cancel while wait is running...");
-          const cancelRes = await fetch(`${baseUrl}/tasks/${taskId}/cancel`, { method: "POST" });
+          const cancelRes = await fetch(`${baseUrl}/tasks/${taskId}/cancel`, {
+            method: "POST",
+            headers: authHeaders,
+          });
           const cancelBody = (await cancelRes.json()) as { cancelled?: boolean };
           console.log("cancel response:", cancelBody);
 
@@ -110,7 +117,7 @@ async function main(): Promise<void> {
   // 给 TaskRunner catch 落库一点时间
   await new Promise((resolve) => setTimeout(resolve, 500));
 
-  const taskRes = await fetch(`${baseUrl}/tasks/${taskId}`);
+  const taskRes = await fetch(`${baseUrl}/tasks/${taskId}`, { headers: authHeaders });
   const taskBody = (await taskRes.json()) as {
     task: { status: string; errorCode: string | null };
   };

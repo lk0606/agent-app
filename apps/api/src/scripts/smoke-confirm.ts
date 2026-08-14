@@ -19,6 +19,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const baseUrl = process.env.SMOKE_API_BASE_URL ?? "http://127.0.0.1:3000";
+// E.13：dev:server 若配了 API_AUTH_TOKEN，这里必须带同一个 token，否则全部请求 401
+const authHeaders: Record<string, string> = process.env.API_AUTH_TOKEN
+  ? { authorization: `Bearer ${process.env.API_AUTH_TOKEN}` }
+  : {};
 // 例：pnpm run smoke:confirm -- --decision=reject → 走拒绝断言分支
 const decisionArg = process.argv.find((arg) => arg.startsWith("--decision="));
 const decision = (decisionArg?.slice("--decision=".length) ?? "approve") as "approve" | "reject";
@@ -46,7 +50,7 @@ async function main(): Promise<void> {
   // [1] 钉死 write_file：与 E.8 smoke:cancel 钉死 wait 同理，否则模型可能口头答应不调工具
   const response = await fetch(`${baseUrl}/agent/stream`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...authHeaders },
     body: JSON.stringify({
       input: `请务必调用 write_file 工具，把内容 ${marker} 写入相对路径 ${fixtureName}，完成后一句话确认。`,
     }),
@@ -122,7 +126,7 @@ async function main(): Promise<void> {
           confirmPosted = true;
 
           // [2] 挂起窗口内先验 GET：status + pendingConfirmation，再 POST confirm（对齐手测场景 A/B）
-          const pendingRes = await fetch(`${baseUrl}/tasks/${taskId}`);
+          const pendingRes = await fetch(`${baseUrl}/tasks/${taskId}`, { headers: authHeaders });
           const pendingBody = (await pendingRes.json()) as {
             task: { status: string };
             pendingConfirmation: { toolName: string } | null;
@@ -144,7 +148,7 @@ async function main(): Promise<void> {
           console.log(`Posting confirm decision=${decision} ...`);
           const confirmRes = await fetch(`${baseUrl}/tasks/${taskId}/confirm`, {
             method: "POST",
-            headers: { "content-type": "application/json" },
+            headers: { "content-type": "application/json", ...authHeaders },
             body: JSON.stringify({ decision }),
           });
           const confirmBody = (await confirmRes.json()) as { accepted?: boolean };
@@ -173,7 +177,7 @@ async function main(): Promise<void> {
 
   await new Promise((resolve) => setTimeout(resolve, 500));
 
-  const taskRes = await fetch(`${baseUrl}/tasks/${taskId}`);
+  const taskRes = await fetch(`${baseUrl}/tasks/${taskId}`, { headers: authHeaders });
   const taskBody = (await taskRes.json()) as {
     task: { status: string; summary: string | null };
     toolCalls: Array<{ toolName: string; status: string; errorCode: string | null }>;

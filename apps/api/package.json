@@ -15,6 +15,7 @@
     "db:migrate": "dotenv_config_path=.env tsx src/scripts/migrate-postgres.ts",
     "evals:run": "dotenv_config_path=.env tsx src/scripts/run-evals.ts",
     "rag:index": "dotenv_config_path=.env tsx src/scripts/rag-index.ts",
+    "smoke:auth": "dotenv_config_path=.env tsx src/scripts/smoke-auth.ts",
     "smoke:cancel": "dotenv_config_path=.env tsx src/scripts/smoke-cancel.ts",
     "smoke:confirm": "dotenv_config_path=.env tsx src/scripts/smoke-confirm.ts",
     "smoke:metrics": "dotenv_config_path=.env tsx src/scripts/smoke-metrics.ts",

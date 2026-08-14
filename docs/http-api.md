@@ -2,6 +2,39 @@
 
 这份文档记录当前后端给前端使用的最小 HTTP API。
 
+## 鉴权与限流（E.13）
+
+除 `GET /health` 外，所有接口都会先过限流、再过鉴权：
+
+| 检查 | 行为 |
+|---|---|
+| **限流** | 按客户端 IP 固定窗口计数（默认 60 请求 / 60 秒，见 `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX_REQUESTS`）；超限返回 `429`，鉴权失败的请求同样计数，避免无 token 暴力枚举绕开限流 |
+| **鉴权** | 请求头须带 `Authorization: Bearer <API_AUTH_TOKEN>`；**若未设置 `API_AUTH_TOKEN`（默认留空），鉴权整体关闭**——这是仅限本地学习环境的默认值，server 启动时会打一条 warn 日志提醒 |
+
+401 响应示例（缺 header 或 token 不匹配）：
+
+```json
+{
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Missing or malformed Authorization header. Expected: Bearer <token>."
+  }
+}
+```
+
+429 响应示例：
+
+```json
+{
+  "error": {
+    "code": "RATE_LIMITED",
+    "message": "Rate limit exceeded. Retry after 42s."
+  }
+}
+```
+
+前端联调：`apps/web/.env.local` 配 `NEXT_PUBLIC_AGENT_API_TOKEN`（与后端 `API_AUTH_TOKEN` 一致），`apps/web/src/lib/api/api-utils.ts` 的 `getAuthHeaders()` 会自动带上。
+
 ## Health
 
 ```http
