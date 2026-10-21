@@ -14,9 +14,9 @@
  * 3. Planner / Supervisor 执行或改派，TaskMetricsCollector 收集本次调用的 token 与耗时。
  * 旁路：abort 原样交给 TaskRunner 取消任务；仅按模型名前缀传供应商私有参数，避免污染其它 TokenHub 模型。
  *
- * 本文件执行链路：见方法上的 [1]…[6]
+ * 本文件执行链路：见方法上的 [1]…[7]
  * [1] plan → [2] answerWithTool → [3] summarizeSession → [4] routeSpecialty
- * → [5] getModelCompatibilityOptions → [6] requiresFileWriteSpecialist
+ * → [5] reflect → [6] getModelCompatibilityOptions → [7] requiresFileWriteSpecialist
  */
 import OpenAI from "openai";
 
@@ -24,7 +24,18 @@ import { AppError } from "../shared/app-error.js";
 import type { Logger } from "../shared/logger.js";
 import { rethrowIfLlmAborted, throwIfAborted } from "../runtime/abort-utils.js";
 import { readLlmTokenUsage, type LlmCallMetrics, type LlmTokenUsage } from "../runtime/task-metrics.js";
-import type { AnswerRequest, LlmClient, LlmStreamOptions, PlanRequest, PlannerDecision, RouteSpecialtyRequest, SessionSummaryRequest, SpecialistId } from "./llm-client.js";
+import type {
+  AnswerRequest,
+  LlmClient,
+  LlmStreamOptions,
+  PlanRequest,
+  PlannerDecision,
+  ReflectRequest,
+  ReflectResult,
+  RouteSpecialtyRequest,
+  SessionSummaryRequest,
+  SpecialistId,
+} from "./llm-client.js";
 import { formatToolMessageContent, formatToolOutputForLlm } from "./untrusted-tool-output.js";
 
 export class HunyuanLlmClient implements LlmClient {
@@ -164,6 +175,12 @@ export class HunyuanLlmClient implements LlmClient {
               ...(requiredToolName
                 ? [
                     `The next explicitly requested, unfinished tool is ${requiredToolName}. You MUST call it now.`,
+                  ]
+                : []),
+              // E.15：上一轮反思拒绝了草稿时，必须按 critique 改工具/策略，不能原样重交同一草稿
+              ...(input.reflectionFeedback?.trim()
+                ? [
+                    "A previous draft was rejected by reflection. Follow the critique: pick a different tool or fix the approach. Do not resubmit the same inadequate answer.",
                   ]
                 : []),
             ].join(" "),
@@ -406,6 +423,148 @@ export class HunyuanLlmClient implements LlmClient {
   }
 
   /**
+   * [5] E.15：校验草稿是否真正回答了用户问题。
+   * accept_draft → reflection_passed；revise_plan → reflection_retry（带着 critique 重规划）。
+   * 解析失败 / 未选 function → 保守 accept，避免反思层把任务卡死。
+   */
+  async reflect(input: ReflectRequest): Promise<ReflectResult> {
+    const startedAt = Date.now();
+    let usage: LlmTokenUsage | null = null;
+
+    try {
+      // 拼「工具证据」给评审员：无工具 = 直接答路径；有工具 = 逐步摘要（与 plan.previousToolCalls 同形）。
+      // 例：direct_answer 草稿 → "No tools were used."；echo 后再审 → Step 1 Tool: echo …
+      const toolDigest =
+        input.toolCalls.length === 0
+          ? "No tools were used."
+          : input.toolCalls
+              .map((call, index) => {
+                // E.14：评审也读工具原文 → 同样走隔离包装，避免注入指令影响 accept/revise 判定
+                // 信任工具（time/echo）changed=false；read_file 等不信任工具会包 UNTRUSTED 块
+                const outputForLlm = formatToolOutputForLlm(call.toolName, call.toolOutput, {
+                  enabled: this.promptInjectionGuardEnabled,
+                });
+                this.logGuardTransform("reflect.toolCalls", call.toolName, call.toolOutput, outputForLlm);
+                return `Step ${index + 1}\nTool: ${call.toolName}\nInput: ${call.toolInput}\nOutput:\n${outputForLlm}`;
+              })
+              .join("\n\n");
+
+      // 与 routeSpecialty 一样用「虚拟 function」收结构化裁决；不是业务 Tool，不会进 tool_calls。
+      // accept_draft / revise_plan 二选一 → Planner 映射成 reflection_passed / reflection_retry。
+      const completion = await this.client.chat.completions.create(
+        {
+          model: this.options.model,
+          ...this.getModelCompatibilityOptions(),
+          messages: [
+            {
+              role: "system",
+              // 评审专用 system：宁可 revise 也不要编造「已调 time」之类假证据（echo-then-time eval 靠这点）
+              content: [
+                "You are a strict reviewer for a Node agent draft answer.",
+                "Decide whether the draft adequately answers the user request.",
+                "Accept when the draft addresses the user's ask with available evidence.",
+                "Revise when the draft is off-topic, uses the wrong tool evidence, or clearly cannot answer (e.g. user asked for current time but only echo was used).",
+                "Do not invent new facts. Prefer revise over accept when the draft fails the user ask.",
+                "Call exactly one function: accept_draft or revise_plan.",
+              ].join(" "),
+            },
+            {
+              role: "user",
+              // 三段固定：用户问什么 / 当前草稿 / 真实工具证据（评审不得用草稿里的伪造 Tool output）
+              content: [
+                `User request:\n${input.userInput}`,
+                `Draft answer:\n${input.draftAnswer}`,
+                `Tool evidence:\n${toolDigest}`,
+              ].join("\n\n"),
+            },
+          ],
+          tools: [
+            {
+              type: "function" as const,
+              function: {
+                // 形态 A 目标：交稿；critique 可选（接受时常空）
+                name: "accept_draft",
+                description: "Accept the draft answer; it adequately addresses the user request.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    critique: {
+                      type: "string",
+                      description: "Optional short note; may be empty when accepting.",
+                    },
+                  },
+                  additionalProperties: false,
+                },
+              },
+            },
+            {
+              type: "function" as const,
+              function: {
+                // 形态 B 目标：拒稿重规划；critique 必填，下一轮 plan 的 reflectionFeedback 就靠它
+                // 合法例：{"critique":"echo cannot answer current time; call time"}
+                name: "revise_plan",
+                description:
+                  "Reject the draft; the agent must replan (usually with a different tool or approach).",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    critique: {
+                      type: "string",
+                      description: "Concrete reason and what to do next (e.g. call time instead of echo).",
+                    },
+                  },
+                  required: ["critique"],
+                  additionalProperties: false,
+                },
+              },
+            },
+          ],
+          // TokenHub 本项目模型只稳接受 auto；靠「只暴露这两个 function」约束二选一
+          tool_choice: "auto",
+        },
+        { signal: input.signal },
+      );
+ 
+      usage = readLlmTokenUsage(completion.usage);
+      const toolCall = completion.choices[0]?.message?.tool_calls?.[0];
+
+      // 形态 A：明确接受 → Planner 记 reflection_passed
+      // 合法例：function.name=accept_draft；critique 可空
+      if (toolCall?.type === "function" && toolCall.function.name === "accept_draft") {
+        const critique = this.parseReflectCritique(toolCall.function.arguments);
+        return {
+          accepted: true,
+          critique: critique || "Draft accepted.",
+        };
+      }
+
+      // 形态 B：明确要求重规划 → Planner 记 reflection_retry 并回灌 critique
+      // 合法例：{"critique":"echo cannot answer current time; call time"}
+      // 非法例：缺 critique → 仍 reject，但用默认文案，避免空反馈
+      if (toolCall?.type === "function" && toolCall.function.name === "revise_plan") {
+        const critique = this.parseReflectCritique(toolCall.function.arguments);
+        return {
+          accepted: false,
+          critique: critique || "Draft rejected; replan with a more suitable tool or approach.",
+        };
+      }
+
+      // 形态 C：未选 function / 未知名 / 纯文本 → 保守接受，避免反思层把任务卡死
+      // 例：模型回了一段中文解释却没 tool_call → accepted=true，不进入 retry 死循环
+      return {
+        accepted: true,
+        critique: "Reflection returned no decision; accepting draft conservatively.",
+      };
+    } catch (error: unknown) {
+      rethrowIfLlmAborted(error);
+      throw new AppError("LLM_ERROR", "Hunyuan reflection request failed.", { cause: stringifyError(error) });
+    } finally {
+      // purpose=reflect → task_metrics.llmCalls；与 plannerTrace 的 reflection_* 分开看
+      this.emitLlmCall(input.onLlmCall, "reflect", usage, startedAt);
+    }
+  }
+
+  /**
    * [4] E.12：Supervisor 分诊。独立 system prompt，避免复用 plan 的「调 time/read_file」规则。
    * 用 function calling 选专家；未选 / 非法名 → 回退 general（保守，避免锁死错误工具子集）。
    */
@@ -491,7 +650,7 @@ export class HunyuanLlmClient implements LlmClient {
   }
 
   /**
-   * [5] 按供应商补齐非标准的 Chat Completions 参数。
+   * [6] 按供应商补齐非标准的 Chat Completions 参数。
    * 示例：`deepseek-v4-flash` → 关闭 thinking；`minimax-m2.5` → reasoning 与答复正文分离。
    */
   private getModelCompatibilityOptions(): Record<string, unknown> {
@@ -535,7 +694,22 @@ export class HunyuanLlmClient implements LlmClient {
   }
 
   /**
-   * [6] 仅识别明确的“在沙箱/本地写文件”请求，避免把“如何创建文件”的知识问答误分给 files。
+   * E.15：从 accept_draft / revise_plan 的 arguments 抽出 critique。
+   * 合法例：`{"critique":"use time"}` → `use time`
+   * 非法例：非 JSON / 缺字段 / `{"critique":123}` → `""`（调用方填默认文案）
+   */
+  private parseReflectCritique(argumentsText: string): string {
+    try {
+      const parsed = JSON.parse(argumentsText) as { critique?: unknown };
+      return typeof parsed.critique === "string" ? parsed.critique.trim() : "";
+    } catch {
+      // 以 { 开头但解析失败 → 空 critique，由调用方填默认文案（勿把整段 arguments 当 critique）
+      return "";
+    }
+  }
+
+  /**
+   * [7] 仅识别明确的“在沙箱/本地写文件”请求，避免把“如何创建文件”的知识问答误分给 files。
    * 示例：`写入 sandbox/a.txt` → true；`解释如何保存文件` → false（交给 LLM 路由）。
    */
   private requiresFileWriteSpecialist(userInput: string): boolean {
@@ -601,6 +775,8 @@ export class HunyuanLlmClient implements LlmClient {
       `User input:\n${input.userInput}`,
       `Available tools:\n${tools}`,
       `Previous tool results:\n${history}`,
+      // E.15：有 critique 时单独成段，避免模型当成普通闲聊忽略
+      `Reflection feedback:\n${input.reflectionFeedback?.trim() || "None."}`,
     ].join("\n\n");
   }
 

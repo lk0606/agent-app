@@ -30,19 +30,26 @@ export class EscalateToGeneralError extends Error {
  * 常规执行顺序（跨模块）：
  * 1. TaskRunner 调本类 plan；supervisor 模式先由 Supervisor 选专家与工具子集。
  * 2. plan 读取会话上下文 → LlmClient.plan 决定工具或直接回答 → Tool 执行并写 planner_steps / tool_calls。
- * 3. 工具结果交 LlmClient.answerWithTool 组织回答，最后写 messages，由 TaskRunner 收尾 HTTP/SSE。
+ * 3. 产出草稿后（E.15）可选 LlmClient.reflect 自检：通过则交稿，拒绝则带着 critique 再 plan。
+ * 4. 工具结果交 LlmClient.answerWithTool 组织回答，最后写 messages，由 TaskRunner 收尾 HTTP/SSE。
  * 旁路：受限专家缺 general 工具时抛 EscalateToGeneralError，由 Supervisor 改派；危险 Tool 则先等人工确认。
  *
- * 本文件执行链路：见方法上的 [1]…[4]
- * [1] plan → [2] awaitHumanConfirmation → [3] answerFromToolResult → [4] buildSessionContext
+ * 本文件执行链路：见方法上的 [1]…[5]
+ * [1] plan → [2] awaitHumanConfirmation → [3] answerFromToolResult → [4] finalizeDraftWithReflection → [5] buildSessionContext
  */
 export class PlannerAgent implements Agent {
   constructor(
     private readonly options: {
+      /** 主循环最多迭代几次；对应 env AGENT_MAX_STEPS（每次迭代一次 llm.plan） */
       maxSteps: number;
+      /** 成功工具次数上限；对应 env AGENT_TOOL_CALL_BUDGET */
       toolCallBudget: number;
       sessionHistoryMessageLimit: number;
       sessionHistoryCharBudget: number;
+      /** E.15：定稿前是否调用 llm.reflect；false = 纯 ReAct */
+      reflectionEnabled?: boolean;
+      /** E.15：拒绝草稿后最多再规划几次 */
+      reflectionMaxRetries?: number;
     },
   ) {}
 
@@ -59,7 +66,20 @@ export class PlannerAgent implements Agent {
     let finalAnswer = "";
     const streamedFlag = { value: false }; // answerWithTool 是否已推过 token（SSE 用）
     // E.12：Supervisor 已写 step 1（routed）时 offset=1，避免专家 step 与路由步冲突
-    const stepOffset = context.stepOffset ?? 0;
+    // E.15：reflection 步也占 plannerTrace.step，因此用游标统一分配，不能再用「循环下标 + offset」硬算
+    // 例：plan(echo)=1 → reflect=2 → plan(time)=3 → reflect=4；循环 iteration 只到 2，但 step 已到 4
+    let stepCursor = context.stepOffset ?? 0;
+    const allocateStep = (): number => {
+      stepCursor += 1;
+      return stepCursor;
+    };
+    // E.15：上一轮反思 critique；喂给下一轮 llm.plan 的 reflectionFeedback
+    let reflectionFeedback: string | null = null;
+    let reflectionRetryCount = 0;
+    // 未传视为开启（与 env AGENT_REFLECTION 默认 true 一致）；显式 false 才关
+    const reflectionEnabled = this.options.reflectionEnabled !== false;
+    // 拒绝后最多再 plan 几次；与 enabled 分开：budget_exceeded 路径会传 maxRetries=0 仍审一次
+    const reflectionMaxRetries = this.options.reflectionMaxRetries ?? 1;
     // E.12.x：升级后的组合任务若重复已成功工具，下一轮从 LLM 可见工具中排除它。
     // 例：time 已成功却再次被选中 → 后续只让模型看到 write_file 等未排除工具。
     const excludedToolNames = new Set<string>();
@@ -75,11 +95,11 @@ export class PlannerAgent implements Agent {
           .map((item) => item.name)
       : [];
 
-    for (let step = 0; step < this.options.maxSteps; step += 1) {
+    for (let iteration = 0; iteration < this.options.maxSteps; iteration += 1) {
       // E.8：每步开始前检查取消/超时，避免 abort 后继续打 LLM
       throwIfAborted(context.signal);
 
-      const stepNumber = step + 1 + stepOffset;
+      const stepNumber = allocateStep();
       const stepStartedAt = Date.now();
       const stepCreatedAt = new Date(stepStartedAt).toISOString();
 
@@ -137,6 +157,8 @@ export class PlannerAgent implements Agent {
         requiredToolNames: requiredToolNames.filter(
           (toolName) => !toolCalls.some((call) => call.toolName === toolName),
         ),
+        // E.15：上一轮反思 critique；无则 null，模型看到 Reflection feedback: None.
+        reflectionFeedback,
         signal: context.signal,
         // E.9：把本次 plan 的 token/耗时报给 TaskMetricsCollector
         onLlmCall: (event) => context.metrics?.recordLlmCall(event),
@@ -185,18 +207,20 @@ export class PlannerAgent implements Agent {
 
       // C. 不需要工具 → outcome: direct_answer
       if (!decision.needsTool || !decision.toolName) {
+        // 开启 Reflection 时先不 stream：草稿可能被拒绝；通过后再由文末 emitTokenStream 推送
+        const streamDraft = !reflectionEnabled;
         // 若本轮已调过工具，用 answerWithTool；否则用 plan 返回的 draftAnswer
-        if (toolCalls.length > 0) {
-          finalAnswer = await this.answerFromToolResult(
-            context,
-            request,
-            sessionContext,
-            toolCalls[toolCalls.length - 1]!,
-            streamedFlag,
-          );
-        } else {
-          finalAnswer = decision.draftAnswer;
-        }
+        const draftAnswer =
+          toolCalls.length > 0
+            ? await this.answerFromToolResult(
+                context,
+                request,
+                sessionContext,
+                toolCalls[toolCalls.length - 1]!,
+                streamedFlag,
+                streamDraft,
+              )
+            : decision.draftAnswer;
 
         await recordStep({
           needsTool: decision.needsTool,
@@ -207,7 +231,30 @@ export class PlannerAgent implements Agent {
           finishedAt: new Date().toISOString(),
         });
 
-        break;
+        const accepted = await this.finalizeDraftWithReflection({
+          context,
+          request,
+          draftAnswer,
+          toolCalls,
+          allocateStep,
+          reflectionEnabled,
+          reflectionMaxRetries,
+          reflectionRetryCount,
+          setReflectionRetryCount: (value) => {
+            reflectionRetryCount = value;
+          },
+          setReflectionFeedback: (value) => {
+            reflectionFeedback = value;
+          },
+        });
+
+        if (accepted) {
+          finalAnswer = draftAnswer;
+          break;
+        }
+
+        // reflection_retry：带着 critique 进入下一轮 plan
+        continue;
       }
 
       // D. 工具预算用尽 → outcome: budget_exceeded
@@ -220,7 +267,14 @@ export class PlannerAgent implements Agent {
         const lastCall = toolCalls[toolCalls.length - 1];
 
         if (lastCall) {
-          finalAnswer = await this.answerFromToolResult(context, request, sessionContext, lastCall, streamedFlag);
+          const draftAnswer = await this.answerFromToolResult(
+            context,
+            request,
+            sessionContext,
+            lastCall,
+            streamedFlag,
+            !reflectionEnabled,
+          );
 
           await recordStep({
             needsTool: true,
@@ -230,6 +284,25 @@ export class PlannerAgent implements Agent {
             durationMs: Date.now() - stepStartedAt,
             finishedAt: new Date().toISOString(),
           });
+
+          // 预算已尽：即使反思想重试也不再开新工具；仍跑一次 reflect 记 outcome，然后强制交稿
+          await this.finalizeDraftWithReflection({
+            context,
+            request,
+            draftAnswer,
+            toolCalls,
+            allocateStep,
+            reflectionEnabled,
+            reflectionMaxRetries: 0,
+            reflectionRetryCount,
+            setReflectionRetryCount: (value) => {
+              reflectionRetryCount = value;
+            },
+            setReflectionFeedback: (value) => {
+              reflectionFeedback = value;
+            },
+          });
+          finalAnswer = draftAnswer;
           break;
         }
       }
@@ -281,8 +354,35 @@ export class PlannerAgent implements Agent {
           continue;
         }
 
-        finalAnswer = await this.answerFromToolResult(context, request, sessionContext, existingCall, streamedFlag);
-        break;
+        const draftAnswer = await this.answerFromToolResult(
+          context,
+          request,
+          sessionContext,
+          existingCall,
+          streamedFlag,
+          !reflectionEnabled,
+        );
+        const accepted = await this.finalizeDraftWithReflection({
+          context,
+          request,
+          draftAnswer,
+          toolCalls,
+          allocateStep,
+          reflectionEnabled,
+          reflectionMaxRetries,
+          reflectionRetryCount,
+          setReflectionRetryCount: (value) => {
+            reflectionRetryCount = value;
+          },
+          setReflectionFeedback: (value) => {
+            reflectionFeedback = value;
+          },
+        });
+        if (accepted) {
+          finalAnswer = draftAnswer;
+          break;
+        }
+        continue;
       }
 
       throwIfAborted(context.signal);
@@ -391,15 +491,36 @@ export class PlannerAgent implements Agent {
           continue;
         }
 
-        // 单工具任务（eval 基线均为 maxToolCalls=1）：工具成功后直接流式生成回答，跳过第二轮 plan。
-        finalAnswer = await this.answerFromToolResult(
+        // 单工具任务（eval 基线多为 maxToolCalls=1）：工具成功后生成草稿；E.15 可自检后再交稿。
+        const draftAnswer = await this.answerFromToolResult(
           context,
           request,
           sessionContext,
           { toolName: tool.name, input: toolInput, output: toolOutput },
           streamedFlag,
+          !reflectionEnabled,
         );
-        break;
+        const accepted = await this.finalizeDraftWithReflection({
+          context,
+          request,
+          draftAnswer,
+          toolCalls,
+          allocateStep,
+          reflectionEnabled,
+          reflectionMaxRetries,
+          reflectionRetryCount,
+          setReflectionRetryCount: (value) => {
+            reflectionRetryCount = value;
+          },
+          setReflectionFeedback: (value) => {
+            reflectionFeedback = value;
+          },
+        });
+        if (accepted) {
+          finalAnswer = draftAnswer;
+          break;
+        }
+        continue;
       } catch (error: unknown) {
         // 取消/超时不是工具失败：原样抛出，由 TaskRunner 落 cancelled
         if (error instanceof AppError && isTaskCancellation(error)) {
@@ -457,10 +578,17 @@ export class PlannerAgent implements Agent {
 
       const fallbackStartedAt = Date.now();
       const fallbackCreatedAt = new Date(fallbackStartedAt).toISOString();
-      // 与循环内一致：计入 stepOffset，避免与 Supervisor routed 步撞号
-      const fallbackStep = toolCalls.length + 1 + stepOffset;
+      // 与循环内一致：用游标分配 step，避免与 Supervisor routed / reflection 步撞号
+      const fallbackStep = allocateStep();
 
-      finalAnswer = await this.answerFromToolResult(context, request, sessionContext, lastCall, streamedFlag);
+      const draftAnswer = await this.answerFromToolResult(
+        context,
+        request,
+        sessionContext,
+        lastCall,
+        streamedFlag,
+        !reflectionEnabled,
+      );
 
       await context.memory.recordPlannerStep({
         // 循环因 maxSteps 结束且尚无 finalAnswer 时，用最后一次工具结果强行生成回答。
@@ -474,6 +602,25 @@ export class PlannerAgent implements Agent {
         createdAt: fallbackCreatedAt,
         finishedAt: new Date().toISOString(),
       });
+
+      // maxSteps 已尽：反思预算强制为 0，只记 reflection_passed/retry 后交稿，不再开新轮
+      await this.finalizeDraftWithReflection({
+        context,
+        request,
+        draftAnswer,
+        toolCalls,
+        allocateStep,
+        reflectionEnabled,
+        reflectionMaxRetries: 0,
+        reflectionRetryCount,
+        setReflectionRetryCount: (value) => {
+          reflectionRetryCount = value;
+        },
+        setReflectionFeedback: (value) => {
+          reflectionFeedback = value;
+        },
+      });
+      finalAnswer = draftAnswer;
     }
 
     // J. 未走真流式时，把 finalAnswer 切片推 token（仅 /agent/stream）
@@ -653,6 +800,7 @@ export class PlannerAgent implements Agent {
   /**
    * [3] 将一个工具结果连同会话上下文交给 LLM，返回可直接写入 assistant message 的自然语言答复。
    * 输入例：time 的 ISO 时间；输出例：`现在是 10:00`，流式时同步转发 SSE token。
+   * @param allowStream false 时不推 token（E.15 草稿可能被反思拒绝，避免先流式泄露错误答复）
    */
   private async answerFromToolResult(
     context: AgentContext,
@@ -660,6 +808,7 @@ export class PlannerAgent implements Agent {
     sessionContext: { sessionSummary: string | null; recentHistory: LlmConversationMessage[] },
     toolCall: { toolName: string; input: string; output: string },
     streamedFlag: { value: boolean },
+    allowStream = true,
   ): Promise<string> {
     return context.llm.answerWithTool(
       {
@@ -673,13 +822,138 @@ export class PlannerAgent implements Agent {
         onLlmCall: (event) => context.metrics?.recordLlmCall(event),
       },
       {
-        onToken: createTokenHandler(context.emitStream, request.taskId, streamedFlag),
+        // 开反思：allowStream=false，草稿可能被拒，避免 SSE 先推错误答复；
+        // 通过后由 plan() 文末 emitTokenStream 再推最终稿（streamedFlag 仍为 false）。
+        // 关反思：与改前一致，边生成边推 token。
+        onToken: allowStream
+          ? createTokenHandler(context.emitStream, request.taskId, streamedFlag)
+          : undefined,
       },
     );
   }
 
   /**
-   * [4] 组装喂给模型的会话上下文：旧内容走持久化摘要，最近内容保留原文。
+   * [4] E.15：对草稿做 Reflection 自检。
+   * 返回 true = 可交稿（reflection_passed 或未开启反思）；false = reflection_retry，调用方 continue 再 plan。
+   * 例：用户要时间、草稿只复述 echo → false + critique「改用 time」。
+   */
+  private async finalizeDraftWithReflection(input: {
+    context: AgentContext;
+    request: AgentRequest;
+    draftAnswer: string;
+    toolCalls: AgentResponse["toolCalls"];
+    allocateStep: () => number;
+    reflectionEnabled: boolean;
+    reflectionMaxRetries: number;
+    reflectionRetryCount: number;
+    setReflectionRetryCount: (value: number) => void;
+    setReflectionFeedback: (value: string | null) => void;
+  }): Promise<boolean> {
+    const {
+      context,
+      request,
+      draftAnswer,
+      toolCalls,
+      allocateStep,
+      reflectionEnabled,
+      reflectionMaxRetries,
+      reflectionRetryCount,
+      setReflectionRetryCount,
+      setReflectionFeedback,
+    } = input;
+
+    // 形态 0：AGENT_REFLECTION=false → 不调 llm.reflect，与改前 ReAct 一致直接交稿
+    // 注意：这与「enabled=true 且 maxRetries=0」不同——后者仍会审一次，只是拒绝也不再 plan
+    if (!reflectionEnabled) {
+      setReflectionFeedback(null);
+      return true;
+    }
+
+    throwIfAborted(context.signal);
+
+    // reflection 步单独占 plannerTrace.step（与 tool_executed / direct_answer 并列），用游标分配
+    const stepNumber = allocateStep();
+    const stepStartedAt = Date.now();
+    const stepCreatedAt = new Date(stepStartedAt).toISOString();
+
+    context.logger.info("Reflection started", {
+      step: stepNumber,
+      draftPreview: draftAnswer.slice(0, 240),
+      toolCallCount: toolCalls.length,
+      reflectionRetryCount,
+    });
+
+    // 调评审 LLM；toolCalls 是本任务已成功工具证据（与草稿对照，抓「嘴上说调了 time 实际只有 echo」）
+    const verdict = await context.llm.reflect({
+      userInput: request.input,
+      draftAnswer,
+      toolCalls: toolCalls.map((call) => ({
+        toolName: call.toolName,
+        toolInput: call.input,
+        toolOutput: call.output,
+      })),
+      signal: context.signal,
+      onLlmCall: (event) => context.metrics?.recordLlmCall(event),
+    });
+
+    throwIfAborted(context.signal);
+
+    // 形态 A：接受；或重试预算已用尽 → 强制交稿，避免死循环
+    // 合法例：accepted=true → reflection_passed；
+    // 合法例：budget_exceeded/fallback 传入 maxRetries=0 且仍 revise → forceAccept，仍记 reflection_passed
+    const forceAccept = !verdict.accepted && reflectionRetryCount >= reflectionMaxRetries;
+    if (verdict.accepted || forceAccept) {
+      await context.memory.recordPlannerStep({
+        taskId: request.taskId,
+        step: stepNumber,
+        needsTool: false,
+        toolName: null,
+        toolInput: null,
+        outcome: "reflection_passed",
+        // 强制交稿时用专用码，方便 replay 区分「真通过」vs「预算用尽硬交」
+        errorCode: forceAccept ? "REFLECTION_BUDGET_EXCEEDED" : null,
+        errorMessage: forceAccept
+          ? `Accepted after reflection budget exhausted. Last critique: ${verdict.critique}`
+          : verdict.critique,
+        durationMs: Date.now() - stepStartedAt,
+        createdAt: stepCreatedAt,
+        finishedAt: new Date().toISOString(),
+      });
+      setReflectionFeedback(null);
+      context.logger.info("Reflection accepted draft", {
+        step: stepNumber,
+        forced: forceAccept,
+        critiquePreview: verdict.critique.slice(0, 240),
+      });
+      return true;
+    }
+
+    // 形态 B：拒绝 → 记 reflection_retry；errorMessage=critique，下一轮 plan.reflectionFeedback 同源
+    await context.memory.recordPlannerStep({
+      taskId: request.taskId,
+      step: stepNumber,
+      needsTool: false,
+      toolName: null,
+      toolInput: null,
+      outcome: "reflection_retry",
+      errorCode: null,
+      errorMessage: verdict.critique,
+      durationMs: Date.now() - stepStartedAt,
+      createdAt: stepCreatedAt,
+      finishedAt: new Date().toISOString(),
+    });
+    setReflectionRetryCount(reflectionRetryCount + 1);
+    setReflectionFeedback(verdict.critique);
+    context.logger.info("Reflection rejected draft; will replan", {
+      step: stepNumber,
+      critiquePreview: verdict.critique.slice(0, 240),
+      nextRetryCount: reflectionRetryCount + 1,
+    });
+    return false;
+  }
+
+  /**
+   * [5] 组装喂给模型的会话上下文：旧内容走持久化摘要，最近内容保留原文。
    * 示例：20 条历史且窗口为 8 → 早 12 条进入 sessions.summary，后 8 条原样传给 LLM。
    */
   private async buildSessionContext(request: AgentRequest, context: AgentContext): Promise<{

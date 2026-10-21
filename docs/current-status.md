@@ -2,7 +2,7 @@
 
 这是项目的**唯一进度状态源**。做完一项就更新一项，其他文档只保留设计细节，不再各自维护「已完成 / 下一步」。
 
-最后更新：2026-08-14（E.14：Prompt Injection 隔离包装 + 专项 eval，已完成）
+最后更新：2026-08-14（E.15：Reflection 自我校验循环 + 专项 eval，已完成）
 
 ## 30 秒阅读指南
 
@@ -27,12 +27,14 @@
 | 后端任务怎么测 | 本文件 [【E 节】](#e-后端优先路线当前采用) 每项下的「测试方法」 |
 | **巩固周每日任务（详细）** | [`docs/consolidation-week.md`](consolidation-week.md) |
 | **后端下一阶段做什么（候选清单）** | 本文件 [【E.14+ 后端后续路线】](#e14-后端后续路线候选未选定优先动手项) |
+
 | 想搞懂 Agent **完整原理**（推荐主读） | **[`docs/backend-learning/agent-core-flow.md`](backend-learning/agent-core-flow.md)** |
 | 想搞懂 `runner.run` / `plan()` 速查 | [`docs/backend-learning/agent-run-chain.md`](backend-learning/agent-run-chain.md) |
 | 想搞懂 Tool 选型 / execute / 落库 | [`docs/backend-learning/tool-execution-chain.md`](backend-learning/tool-execution-chain.md) |
 | 想搞懂任务用量 / 估费 / 三种追踪差别 | [`docs/backend-learning/task-metrics-notes.md`](backend-learning/task-metrics-notes.md) |
 | 想搞懂人工确认 / write_file 挂起 | [`docs/backend-learning/human-confirm-notes.md`](backend-learning/human-confirm-notes.md) |
 | 想搞懂 Multi-Agent / Supervisor 路由 | [`docs/backend-learning/multi-agent-notes.md`](backend-learning/multi-agent-notes.md) |
+| 想搞懂 Reflection 自检怎么读代码 | [`docs/backend-learning/reflection-notes.md`](backend-learning/reflection-notes.md) |
 | Agent 运行态 / Cursor 式 SSE 计划 | 本文件 [E.3.5](#e35-agent-运行态完整体验cursor-式) |
 | API / 表 / 字段怎么命名 | 本文件 [【H 节】命名约定](#h-命名约定) |
 | 所有文档分工 | 本文件 [【G 节】文档索引](#g-文档索引) |
@@ -46,7 +48,7 @@
 | `进行中` | 已开工、未验收（开工后可手动标上） |
 | `未开始` | 还没做 |
 
-**当前开发重点（后端优先）：** 后端 E.1–E.14 已交付；前端 Step 2/4/5 已完成（独立 `/tasks/[taskId]` 页可选）；**下一阶段候选见 [E.14+ 后端后续路线](#e14-后端后续路线候选未选定优先动手项)**。
+**当前开发重点（后端优先）：** 后端 E.1–E.15 已交付；前端 Step 2/4/5 已完成（独立 `/tasks/[taskId]` 页可选）；**下一阶段候选见 [E.14+ 后端后续路线](#e14-后端后续路线候选未选定优先动手项)**。
 
 ---
 
@@ -119,7 +121,7 @@ AI / 协作者交付任务时：**聊天里说明 + 源码注释 + 合并前写�
 
 **路线：** 后端优先学习（见【E 节】与 `.cursor/rules/backend-first-learning.mdc`）。前端工作台仅辅助观察后端；日常用 `curl` + `evals:run` + `task:replay` 验证即可。
 
-**当前开发重点：** **E.14 Prompt Injection 防护** 已交付。**下一步：** 从 [E.14+](#e14-后端后续路线候选未选定优先动手项) 选 E.15 Reflection / E.16 重试 / E.17 CI / E.18 traceId 等。
+**当前开发重点：** **E.15 Reflection 自我校验** 已交付。**下一步：** 从 [E.14+](#e14-后端后续路线候选未选定优先动手项) 选 E.16 重试 / E.17 CI / E.18 traceId 等。
 
 **前端何时再动：**
 
@@ -180,6 +182,7 @@ AI / 协作者交付任务时：**聊天里说明 + 源码注释 + 合并前写�
 | Planner 决策链 API（`GET /tasks/:taskId` → `plannerTrace[]`） | 已完成 | E.2 |
 | SSE `POST /agent/stream` | 已完成 | E.3 通路 + E.3.5 真 streaming / planner_decision |
 | Agent 运行态 UI（RunTimeline + MD + 动画） | 已完成 | E.3.5 |
+| Reflection 定稿自检（`reflection_passed` / `reflection_retry`） | 已完成 | E.15 |
 
 ---
 
@@ -1462,12 +1465,81 @@ curl -s -X POST http://localhost:3000/agent/run -H 'content-type: application/js
 
 ---
 
+### E.15 Reflection 自我校验循环
+
+| | |
+|--|--|
+| **状态** | 已完成 |
+| **背景** | E.14 前是纯 ReAct：`plan → tool → answer` 即结束；错工具/答非所问没有「自查再改」层 |
+| **改动范围** | `LlmClient.reflect`、`PlannerAgent` 定稿钩子、`planner_steps.outcome` 新枚举、env 开关、eval |
+| **学习笔记** | [`docs/backend-learning/reflection-notes.md`](backend-learning/reflection-notes.md)（读码顺序 + 坑点 + 验证命令） |
+
+#### 已交付
+
+- `apps/api/src/llm/llm-client.ts`：新增 `reflect()` / `ReflectRequest` / `ReflectResult`；`PlanRequest.reflectionFeedback`
+- `apps/api/src/llm/hunyuan-llm-client.ts`：function calling `accept_draft` / `revise_plan`；解析失败保守 accept
+- `apps/api/src/agents/planner-agent.ts`：草稿生成后 `finalizeDraftWithReflection`；step 游标兼容 reflection 步；拒绝则带着 critique 再 plan
+- `planner_steps.outcome` / 契约：`reflection_passed`、`reflection_retry`
+- `task_metrics` / 契约：`purpose=reflect`
+- env：`AGENT_REFLECTION`（默认 true）、`AGENT_REFLECTION_MAX_RETRIES`（默认 1）；默认 `AGENT_MAX_STEPS` 提到 5
+- eval：`reflection-time-accept`、`reflection-echo-then-time`（`expectedPlannerOutcomes` + `requiresReflection`）
+
+#### 测试方法
+
+```bash
+# 依赖：postgres 已起；apps/api/.env 里 AGENT_REFLECTION=true、AGENT_MAX_STEPS≥5
+pnpm --filter @agent-app/api check
+
+# 专项
+pnpm run evals:run -- --id reflection-time-accept
+pnpm run evals:run -- --id reflection-echo-then-time
+
+# 手测（需 dev:server）
+curl -s -X POST http://localhost:3000/agent/run -H 'content-type: application/json' \
+  -d '{"input":"现在几点了？请调用 time 工具一句话回答。"}' \
+  | jq '{summary: .result.summary, taskId}'
+# 再用返回的 taskId：
+# curl -s http://localhost:3000/tasks/<taskId> | jq '[.plannerTrace[] | {step, outcome, toolName, errorMessage}]'
+# 期望：含 tool_executed(time) + reflection_passed
+```
+
+预期：
+
+| case / 手测 | 期望 |
+|-------------|------|
+| `reflection-time-accept` | `time` + `reflection_passed`（`AGENT_REFLECTION=false` 时：仍可跑，断言**没有** `reflection_passed`） |
+| `reflection-echo-then-time` | `echo`→`reflection_retry`→`time`→`reflection_passed`；关反思时只要求先调到 `echo`，且无 `reflection_*` |
+| A/B | `AGENT_REFLECTION=true/false pnpm run evals:run -- --id reflection-echo-then-time` |
+
+失败排查：`task:replay -- <taskId>` 看 plannerTrace；确认服务已重启读到新 env；若只 echo 不过 → 看 critique 是否喂进下一轮 `Reflection feedback`。
+
+#### 学习要点
+
+1. **Reflection ≠ 又一次 plan**：它审的是「草稿够不够格」，不直接执行业务工具。
+2. **两个 outcome**：`reflection_passed` 交稿；`reflection_retry` 把 critique 写进 `errorMessage` 并回灌下一轮 plan。
+3. **流式兼容**：开启反思时草稿先不 SSE；通过后由既有 `emitTokenStream` 推最终答复，避免先流错误答案。
+4. **预算兜底**：`AGENT_REFLECTION_MAX_RETRIES` 用尽后强制交稿（`REFLECTION_BUDGET_EXCEEDED`），避免死循环。
+5. **观测**：`metrics.llmCalls[].purpose=reflect` 与 `plannerTrace` 分开看。
+
+#### 代码怎么读
+
+| 顺序 | 文件 | 看什么 |
+|------|------|--------|
+| 1 | `apps/api/src/llm/llm-client.ts` | `reflect` 接口与 `reflectionFeedback` |
+| 2 | `apps/api/src/llm/hunyuan-llm-client.ts` | `reflect()`：`accept_draft` / `revise_plan` |
+| 3 | `apps/api/src/agents/planner-agent.ts` | `finalizeDraftWithReflection` + step 游标 |
+| 4 | `apps/api/evals/cases/basic-agent-cases.json` | `reflection-*` 断言 |
+
+心智模型：`plan/tool → 草稿 answer → reflect → (pass 交稿 | retry + critique 再 plan)`。展开读码顺序见 [`reflection-notes.md`](backend-learning/reflection-notes.md)。
+
+---
+
 ### E.14+ 后端后续路线（候选，未选定优先动手项）
 
 | | |
 |--|--|
-| **状态** | 规划中（E.14 已从候选转正式完成） |
-| **背景** | E.1–E.14 已覆盖学习计划阶段 C 安全项中的 prompt injection；其余候选见下表 |
+| **状态** | 规划中（E.15 已从候选转正式完成） |
+| **背景** | E.1–E.15 已覆盖 Reflection；其余候选见下表 |
 | **缺口复核（代码层面已确认，非猜测）** | 全仓库无 `retry`/`429`/`backoff`；`traceId` 仅在注释里提醒"别和 plannerTrace 混"，无实际实现；无 `.github/workflows` CI |
 
 #### P0：安全底线
@@ -1481,7 +1553,7 @@ curl -s -X POST http://localhost:3000/agent/run -H 'content-type: application/js
 
 | 编号 | 目标 | 为什么现在做 | 预估改动范围 |
 |----|------|-------------|--------------|
-| **E.15** | Reflection 自我校验循环 | 目前是纯 ReAct（plan→tool→answer 即结束），无"生成后自查、必要时重新规划"的反思层；是公认的 Agent 能力下一级 | `planner-agent.ts` 加一轮 `reflect` 步骤；`planner_steps.outcome` 新增枚举；eval 覆盖"首次工具选错、反思后纠正" |
+| ~~E.15~~ | ~~Reflection 自我校验循环~~ | 已完成，见上方正式条目 | — |
 | **E.16** | LLM 调用重试退避 + 工具重试策略 | 混元/TokenHub 偶发限流或超时目前直接失败，无工程兜底；需区分幂等工具（`read_file` 可重试）与非幂等工具（`write_file` 不可重试） | `hunyuan-llm-client.ts` 加指数退避；`tool.ts` 接口加 `idempotent` 标记 |
 
 #### P2：工程化收尾
@@ -1526,6 +1598,7 @@ P10  E.11 安全 eval 加固（Tool enforce） ← 已完成
 P11  E.12 Multi-Agent（Supervisor）      ← 已完成
 P12  E.13 HTTP API 鉴权 + 限流           ← 已完成
 P13  E.14 Prompt Injection 防护 + eval   ← 已完成
+P14  E.15 Reflection 自我校验循环        ← 已完成
 ```
 
 前端 Step 2/4 **不阻塞** E.1–E.2、E.4；**E.3 / E.3.5 必须带前端**（E.3.5 为 Step 5 主验收）。
@@ -1612,6 +1685,7 @@ P13  E.14 Prompt Injection 防护 + eval   ← 已完成
 | **`docs/backend-learning/agent-core-flow.md`** | **Agent 完整原理手册（HTTP→落库→Session→Eval→安全）** |
 | **`docs/backend-learning/task-metrics-notes.md`** | **E.9：metrics / plannerTrace / traceId；估费野路子** |
 | **`docs/backend-learning/multi-agent-notes.md`** | **E.12：Supervisor / 专家 / 测试与验收** |
+| **`docs/backend-learning/reflection-notes.md`** | **E.15：Reflection 读码顺序 / 坑点 / 验证** |
 | **`docs/backend-learning/`** | HTTP body / Agent 全链路 / Debug / 400 details 概念笔记 |
 | **`docs/consolidation-week.md`** | **E.5 巩固周完整手册**（Day 1–5 详细任务） |
 | `docs/fullstack-frontend-plan.md` | 前后端技术选型与 Step 设计 |

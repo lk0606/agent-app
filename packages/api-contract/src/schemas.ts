@@ -81,6 +81,15 @@ export const PlannerStepOutcomeSchema = z.enum([
    * 紧随其后的 routed/general 才表示 Supervisor 已接受这次升级。
    */
   "escalated",
+  /**
+   * E.15：Reflection 接受草稿答复（自检通过，可结束）。
+   * 与 tool_executed / direct_answer 不同：那些是产出草稿，本值是校验结果。
+   */
+  "reflection_passed",
+  /**
+   * E.15：Reflection 拒绝草稿并要求重规划；errorMessage 常为 critique。
+   */
+  "reflection_retry",
 ]);
 
 export const PlannerStepRecordSchema = z.object({
@@ -163,7 +172,7 @@ export const ArchiveSessionResponseSchema = z.object({
 
 /** E.9：单次 LLM HTTP 调用明细（写入 task_metrics.llm_calls） */
 export const LlmCallMetricsSchema = z.object({
-  purpose: z.enum(["plan", "answer", "summarize", "route"]),
+  purpose: z.enum(["plan", "answer", "summarize", "route", "reflect"]),
   model: z.string(),
   promptTokens: z.number().int().nonnegative().nullable(),
   completionTokens: z.number().int().nonnegative().nullable(),

@@ -4,6 +4,7 @@
  * - answerWithTool：拿工具结果组织自然语言（可 stream）
  * - summarizeSession：把旧会话压成 summary 写回 sessions 表
  * - routeSpecialty：E.12 Supervisor 分诊（docs | files | general），与 plan 的工具选型 prompt 分离
+ * - reflect：E.15 对草稿答复自检（accept / revise），不执行工具
  *
  * E.8.5：各 Request 可带 signal，混元 HTTP 中途可被 cancel/超时 abort。
  * E.9：各 Request 可带 onLlmCall，回报 token 用量与单次耗时（写入 task_metrics，非 traceId）。
@@ -73,6 +74,11 @@ export interface PlanRequest {
    * 例：`先 time，再 write_file` → 首轮 ["time", "write_file"]；time 成功后 → ["write_file"]。
    */
   requiredToolNames?: string[];
+  /**
+   * E.15：上一轮 Reflection 拒绝草稿时的 critique。
+   * 例：`echo 无法回答当前时间，应改用 time`；无反思重试时为 undefined/null。
+   */
+  reflectionFeedback?: string | null;
   /** E.8.5：取消/超时时中止本次 plan 的 HTTP 请求 */
   signal?: AbortSignal;
   /** E.9：本次 plan HTTP 结束后回报用量（成功/失败/abort 都会尽量调用） */
@@ -108,6 +114,28 @@ export interface SessionSummaryRequest {
   onLlmCall?: (event: LlmCallMetrics) => void;
 }
 
+/** E.15：对草稿答复做自检；不写盘、不调业务 Tool */
+export interface ReflectRequest {
+  userInput: string;
+  draftAnswer: string;
+  toolCalls: Array<{
+    toolName: string;
+    toolInput: string;
+    toolOutput: string;
+  }>;
+  signal?: AbortSignal;
+  onLlmCall?: (event: LlmCallMetrics) => void;
+}
+
+/**
+ * E.15：accepted=true → 可交稿；false → 带着 critique 重规划。
+ * 解析失败时实现方应保守 accepted=true，避免反思层把任务卡死。
+ */
+export interface ReflectResult {
+  accepted: boolean;
+  critique: string;
+}
+
 export interface LlmStreamOptions {
   /** POST /agent/stream 注入：混元 stream: true 时按 delta 回调 */
   onToken?: (delta: string) => void;
@@ -122,4 +150,9 @@ export interface LlmClient {
    * 解析失败 / 未选 function 时实现方应回退 `general`（保守，避免锁死错误子集）。
    */
   routeSpecialty(input: RouteSpecialtyRequest): Promise<SpecialistId>;
+  /**
+   * E.15：校验草稿是否真正回答了用户问题。
+   * 例：用户问时间但草稿只复述了 echo → accepted=false + critique。
+   */
+  reflect(input: ReflectRequest): Promise<ReflectResult>;
 }

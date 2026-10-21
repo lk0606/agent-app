@@ -609,13 +609,17 @@ function normalizeLlmCallsJson(value: unknown): TaskMetricsRecord["llmCalls"] {
     const purpose = row.purpose;
 
     // 合法例：purpose=route；非法例：purpose=trace → 丢弃该 llmCalls 行
-    if (typeof purpose !== "string" || !["plan", "answer", "summarize", "route"].includes(purpose)) {
+    // E.15：reflect 与 plan/answer 同属一次任务的 LLM 调用明细
+    if (
+      typeof purpose !== "string" ||
+      !["plan", "answer", "summarize", "route", "reflect"].includes(purpose)
+    ) {
       return [];
     }
 
     return [
       {
-        purpose: purpose as "plan" | "answer" | "summarize" | "route",
+        purpose: purpose as "plan" | "answer" | "summarize" | "route" | "reflect",
         model: typeof row.model === "string" ? row.model : "unknown",
         promptTokens: typeof row.promptTokens === "number" ? row.promptTokens : null,
         completionTokens: typeof row.completionTokens === "number" ? row.completionTokens : null,

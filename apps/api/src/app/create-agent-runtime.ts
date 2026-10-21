@@ -106,6 +106,9 @@ export function createAgentRuntime(config: AppConfig) {
     toolCallBudget: config.agentToolCallBudget,
     sessionHistoryMessageLimit: config.sessionHistoryMessageLimit,
     sessionHistoryCharBudget: config.sessionHistoryCharBudget,
+    // E.15：定稿前自检；关了则回到纯 ReAct
+    reflectionEnabled: config.agentReflection,
+    reflectionMaxRetries: config.agentReflectionMaxRetries,
   });
 
   // E.12：supervisor = 路由 + 专家工具子集；single = 全量工具直跑 Planner（对比/救急）

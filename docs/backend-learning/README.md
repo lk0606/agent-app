@@ -26,6 +26,7 @@
 | **[task-metrics-notes.md](./task-metrics-notes.md)** | **E.9：metrics / plannerTrace / traceId；估费野路子（优先读）** |
 | [human-confirm-notes.md](./human-confirm-notes.md) | E.10：人工确认 / Promise 挂起原理 / write_file / confirm API |
 | **[multi-agent-notes.md](./multi-agent-notes.md)** | **E.12：Supervisor / 专家 / routed；怎么测、怎样算对** |
+| **[reflection-notes.md](./reflection-notes.md)** | **E.15：Reflection 怎么学、怎么看代码（读码顺序 + 坑点）** |
 | [tool-execution-chain.md](./tool-execution-chain.md) | Tool 运行与调用链路；`plan` vs `execute`；读码与调试 |
 
 ## 建议阅读顺序

@@ -35,7 +35,17 @@ export type PlannerStepOutcome =
    * E.12.x：受限专家请求升级到 general（非真实工具执行）。
    * toolName 固定为 general；紧跟下一条 routed 才是 Supervisor 的二次分诊。
    */
-  | "escalated";
+  | "escalated"
+  /**
+   * E.15：Reflection 接受当前草稿答复（可结束本轮）。
+   * 与 tool_executed / direct_answer 分开：后者是「产出草稿」，本 outcome 是「自检通过」。
+   */
+  | "reflection_passed"
+  /**
+   * E.15：Reflection 拒绝草稿，要求重新规划。
+   * errorMessage 常带 critique；下一轮 plan 会看到 reflectionFeedback。
+   */
+  | "reflection_retry";
 
 export type SessionStatus = "active" | "archived";
 

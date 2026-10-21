@@ -255,12 +255,14 @@ Tool **内部业务逻辑**（索引、沙箱、打分）在 `tools/search-docs-
 
 | outcome | 何时触发 | 下一步 |
 |---------|----------|--------|
-| `direct_answer` | LLM 说不需要工具 | `draftAnswer` 或已有工具结果 → **break** |
+| `direct_answer` | LLM 说不需要工具 | 草稿 →（E.15 可选 reflect）→ **break / 再 plan** |
 | `budget_exceeded` | `toolCalls.length >= toolCallBudget` | 用上次工具结果 `answerWithTool` → **break** |
-| `duplicate_skipped` | 同名同参工具重复 | 复用已有 output → **break** |
-| `tool_executed` | `execute()` 成功 | `answerWithTool` → **break** |
+| `duplicate_skipped` | 同名同参工具重复 | 复用已有 output →（E.15 可选 reflect）→ **break / 再 plan** |
+| `tool_executed` | `execute()` 成功 | `answerWithTool` →（E.15 可选 reflect）→ **break / 再 plan** |
 | `tool_failed` | `execute()` 抛错 | 记库后 **throw** → TaskRunner failed |
 | `fallback_answer` | 循环跑满 `maxSteps` 仍无回答 | 用最后工具结果强行回答 |
+| `reflection_passed` | E.15 自检接受草稿 | **交稿结束** |
+| `reflection_retry` | E.15 自检拒绝草稿 | 带着 critique **继续 plan** |
 
 对应源码标注：`planner-agent.ts` 文件头注释「A–J 步」。
 

@@ -67,6 +67,7 @@ keyword 那条不会进 2/3；只有 `SEARCH_DOCS_MODE=vector|hybrid` 才会。
 - **成功**工具调用次数是否超限（`maxToolCalls`；失败尝试如安全拦截不计入）
 - 任务是否按预期失败（`expectedTaskStatus` + `expectedErrorCode`）
 - **E.12 路由专家**（`expectedRoutedAgent`：`plannerTrace` 须有 `outcome=routed` 且 `toolName` 匹配；配合 `requiresOrchestration: ["supervisor"]`）
+- **E.15 Reflection outcome**（`expectedPlannerOutcomes`：`AGENT_REFLECTION=true` 时须包含所列 outcome；`=false` 时须都不出现，便于 A/B。可选 `expectedToolsWhenReflectionOff` / `maxToolCallsWhenReflectionOff`）
 
 ### 用例格式
 

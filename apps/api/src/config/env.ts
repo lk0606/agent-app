@@ -12,7 +12,17 @@ export interface AppConfig {
   hunyuanModel: string;
   hunyuanBaseUrl: string;
   databaseUrl: string;
+  /**
+   * Planner 主循环最多迭代几次（每次迭代一次 `llm.plan`）。
+   * 例：5 = 最多规划 5 次；触顶仍无 finalAnswer → `fallback_answer`。
+   * 注意：这是「规划轮次」上限，不是 tool 次数（见 agentToolCallBudget），也不是 plannerTrace 行数
+   *（E.15 reflection 步会另占 step 号，但不额外消耗一轮 maxSteps，除非反思后 continue 再 plan）。
+   */
   agentMaxSteps: number;
+  /**
+   * 单次任务最多成功执行几个工具（status=succeeded 计数）。
+   * 例：2 = 允许 echo 后再 time；触顶再想调工具 → `budget_exceeded`。
+   */
   agentToolCallBudget: number;
   sessionHistoryMessageLimit: number;
   sessionHistoryCharBudget: number;
@@ -71,6 +81,16 @@ export interface AppConfig {
    * 默认 false；只影响日志，不改 prompt 内容。日志较长，别在压测/长文档时开。
    */
   promptInjectionGuardDebug: boolean;
+  /**
+   * E.15：定稿前是否跑 Reflection 自检。
+   * 默认 true；false 时行为回到纯 ReAct（plan→tool→answer 即结束）。
+   */
+  agentReflection: boolean;
+  /**
+   * E.15：Reflection 拒绝草稿后最多再规划几次。
+   * 例：1 = 允许「错工具 → 反思 → 改对工具」一轮；用尽后强制交当前草稿。
+   */
+  agentReflectionMaxRetries: number;
   port: number;
   /**
    * E.13：HTTP 接口鉴权 token；null = 未设置，鉴权关闭（仅限本地学习环境，server.ts 启动时会 warn 提醒）。
@@ -105,7 +125,9 @@ export function loadConfig(): AppConfig {
     hunyuanModel: process.env.HUNYUAN_MODEL ?? "minimax-m2.5",
     hunyuanBaseUrl: process.env.HUNYUAN_BASE_URL ?? "https://tokenhub.tencentmaas.com/v1",
     databaseUrl,
-    agentMaxSteps: readNumber("AGENT_MAX_STEPS", 3),
+    // Planner 最多 llm.plan 几轮；E.15「错工具→反思→再 plan」至少要 2，默认 5 留余量
+    agentMaxSteps: readNumber("AGENT_MAX_STEPS", 5),
+    // 成功工具次数上限（≠ maxSteps）；与 eval 的 maxToolCalls 对照看
     agentToolCallBudget: readNumber("AGENT_TOOL_CALL_BUDGET", 2),
     sessionHistoryMessageLimit: readNumber("SESSION_HISTORY_MESSAGE_LIMIT", 8),
     sessionHistoryCharBudget: readNumber("SESSION_HISTORY_CHAR_BUDGET", 4000),
@@ -143,6 +165,10 @@ export function loadConfig(): AppConfig {
     promptInjectionGuard: readBoolean("PROMPT_INJECTION_GUARD", true),
     // 学习期才开：日志里能看到包装前后两段文本，确认「什么时候转、转成什么」
     promptInjectionGuardDebug: readBoolean("PROMPT_INJECTION_GUARD_DEBUG", false),
+    // E.15：默认开启定稿前自检；false 可对比纯 ReAct
+    agentReflection: readBoolean("AGENT_REFLECTION", true),
+    // E.15：拒绝草稿后最多再 plan 几次；1 足够覆盖「错工具 → 改对工具」
+    agentReflectionMaxRetries: readNumber("AGENT_REFLECTION_MAX_RETRIES", 1),
     port: readNumber("PORT", 3000),
     // E.13：未设置 = 空字符串/undefined 都视为「关闭鉴权」，与 agentTaskTimeoutMs 的「未配置=关闭」同一约定
     apiAuthToken: process.env.API_AUTH_TOKEN?.trim() ? process.env.API_AUTH_TOKEN.trim() : null,

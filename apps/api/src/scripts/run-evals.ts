@@ -16,6 +16,7 @@
  * E.12：expectedRoutedAgent 断言 plannerTrace 存在 outcome=routed 且 toolName=专家 id。
  * E.12.x：expectedEscalationToGeneral 断言至少发生一次受限专家升级，且随后由 Supervisor 改派 general；
  * 升级次数与重复升级不由该字段计数。
+ * E.15：expectedPlannerOutcomes 断言 reflection_passed / reflection_retry 等自检 outcome。
  *
  * CLI 示例：
  *   pnpm run evals:run
@@ -23,6 +24,7 @@
  *   pnpm run evals:run -- --id=search-docs-city-zh
  *   pnpm run evals:run -- --id multi-route-docs
  *   pnpm run evals:run -- --id multi-escalate-files-to-general
+ *   pnpm run evals:run -- --id reflection-echo-then-time
  *   pnpm run evals:run -- evals/cases/basic-agent-cases.json --id search-docs-city
  *
  * 用例增多、拆多文件时的策略见 docs/evals-and-replay.md §用例组织策略。
@@ -80,6 +82,24 @@ interface EvalCase {
    * 例：files 缺 time → 升级 general；该字段不计数升级次数，禁止 general 再升级由 Supervisor 运行时规则负责。
    */
   expectedEscalationToGeneral?: boolean;
+  /**
+   * E.15：断言 plannerTrace 中按任意顺序包含这些 outcome（如 reflection_retry + reflection_passed）。
+   * AGENT_REFLECTION=true → 必须出现；=false → 必须都不出现（改前对照）。
+   */
+  expectedPlannerOutcomes?: string[];
+  /**
+   * E.15 A/B：关反思时用的期望工具（改前常停在错工具）。
+   * 未设则关反思时仍用 expectedTools。
+   */
+  expectedToolsWhenReflectionOff?: string[];
+  /**
+   * E.15 A/B：关反思时的成功工具次数上限；未设则仍用 maxToolCalls。
+   */
+  maxToolCallsWhenReflectionOff?: number;
+  /**
+   * @deprecated 保留字段兼容旧 case；E.15 A/B 改为关反思时仍跑、只切换断言，不再 skip。
+   */
+  requiresReflection?: boolean;
   /** 仅当 AGENT_ORCHESTRATION 为所列值之一时才跑（如 multi-route-* 仅 supervisor） */
   requiresOrchestration?: Array<"supervisor" | "single">;
 }
@@ -186,7 +206,7 @@ async function main(): Promise<void> {
       const known = allIds.includes(caseId);
       throw new Error(
         known
-          ? `Eval case "${caseId}" is skipped for SEARCH_DOCS_MODE=${config.searchDocsMode}. Try vector|hybrid.`
+          ? `Eval case "${caseId}" is skipped for current config (SEARCH_DOCS_MODE=${config.searchDocsMode}, AGENT_ORCHESTRATION=${config.agentOrchestration}).`
           : `Eval case "${caseId}" not found in ${casesPath}. Known ids: ${allIds.join(", ")}`,
       );
     }
@@ -233,7 +253,15 @@ async function main(): Promise<void> {
     const plannerSteps = await memory.listTaskPlannerSteps(assertTaskId);
 
     const durationMs = Date.now() - startedAt;
-    const failures = evaluateCase(testCase, summary, toolCalls, taskStatus, errorCode, plannerSteps);
+    const failures = evaluateCase(
+      testCase,
+      summary,
+      toolCalls,
+      taskStatus,
+      errorCode,
+      plannerSteps,
+      config.agentReflection,
+    );
 
     results.push({
       id: testCase.id,
@@ -386,6 +414,7 @@ async function loadToolCallsFromDb(
  * 以证明打到了 Tool enforce（而非模型口头拒绝后 task 仍 succeeded）。
  * E.12：expectedRoutedAgent → plannerTrace 须有 outcome=routed 且 toolName 匹配。
  * E.12.x：expectedEscalationToGeneral → escalated/general 后须有更高 step 的 routed/general。
+ * E.15：expectedPlannerOutcomes 在 AGENT_REFLECTION=true 时必须出现；=false 时必须都不出现（A/B）。
  */
 function evaluateCase(
   testCase: EvalCase,
@@ -394,11 +423,23 @@ function evaluateCase(
   taskStatus: "succeeded" | "failed" | "cancelled",
   errorCode: string | null,
   plannerSteps: Array<{ outcome: string; toolName: string | null }>,
+  agentReflection: boolean,
 ): string[] {
   const failures: string[] = [];
   const toolNames = toolCalls.map((item) => item.toolName);
   const succeededToolCalls = toolCalls.filter((item) => item.status === "succeeded");
   const normalizedSummary = (summary ?? "").toLowerCase();
+  // E.15 A/B：关反思时用「改前」期望（若 case 声明了）
+  // 合法例：reflection-echo-then-time + AGENT_REFLECTION=false → 只要求 echo，不要求 time
+  // 非法例：关反思仍断言 expectedTools=[echo,time] → 模型常只调 echo 后交稿，误 fail
+  const expectedTools =
+    !agentReflection && testCase.expectedToolsWhenReflectionOff
+      ? testCase.expectedToolsWhenReflectionOff
+      : (testCase.expectedTools ?? []);
+  const maxToolCalls =
+    !agentReflection && typeof testCase.maxToolCallsWhenReflectionOff === "number"
+      ? testCase.maxToolCallsWhenReflectionOff
+      : testCase.maxToolCalls;
 
   if (testCase.expectedTaskStatus && taskStatus !== testCase.expectedTaskStatus) {
     failures.push(`Expected task status "${testCase.expectedTaskStatus}" but got "${taskStatus}".`);
@@ -442,7 +483,31 @@ function evaluateCase(
     }
   }
 
-  for (const toolName of testCase.expectedTools ?? []) {
+  // E.15 A/B：同一 expectedPlannerOutcomes 字段，开关反思断言方向相反
+  // 开：reflection-echo-then-time 须含 reflection_retry + reflection_passed
+  // 关：同一列表必须都不出现（证明没跑 finalizeDraftWithReflection 的落库路径）
+  if (testCase.expectedPlannerOutcomes && testCase.expectedPlannerOutcomes.length > 0) {
+    const seen = new Set(plannerSteps.map((step) => step.outcome));
+    if (agentReflection) {
+      for (const expected of testCase.expectedPlannerOutcomes) {
+        if (!seen.has(expected)) {
+          failures.push(
+            `Expected plannerTrace outcome "${expected}" but got: ${[...seen].join(", ") || "(none)"}.`,
+          );
+        }
+      }
+    } else {
+      for (const unexpected of testCase.expectedPlannerOutcomes) {
+        if (seen.has(unexpected)) {
+          failures.push(
+            `AGENT_REFLECTION=false but plannerTrace still has outcome "${unexpected}" (expected pure ReAct / no reflection steps).`,
+          );
+        }
+      }
+    }
+  }
+
+  for (const toolName of expectedTools) {
     if (!toolNames.includes(toolName)) {
       failures.push(`Expected tool "${toolName}" was not used.`);
     }
@@ -450,6 +515,7 @@ function evaluateCase(
 
   // E.11：安全 case（同时声明 expectedTools + expectedErrorCode）→ 对应工具须有 failed 行且 errorCode 匹配
   // 例：blocked-read-absolute-path 须 tool_calls 里有 read_file/failed/BAD_REQUEST，不能只靠 task 级码
+  // 安全断言仍看 case 原 expectedTools（与 A/B 关反思的 expectedToolsWhenReflectionOff 无关）
   if (testCase.expectedErrorCode && (testCase.expectedTools?.length ?? 0) > 0) {
     for (const toolName of testCase.expectedTools!) {
       const enforced = toolCalls.some(
@@ -485,9 +551,9 @@ function evaluateCase(
     }
   }
 
-  if (typeof testCase.maxToolCalls === "number" && succeededToolCalls.length > testCase.maxToolCalls) {
+  if (typeof maxToolCalls === "number" && succeededToolCalls.length > maxToolCalls) {
     failures.push(
-      `Successful tool call count ${succeededToolCalls.length} exceeded limit ${testCase.maxToolCalls}.`,
+      `Successful tool call count ${succeededToolCalls.length} exceeded limit ${maxToolCalls}.`,
     );
   }
 

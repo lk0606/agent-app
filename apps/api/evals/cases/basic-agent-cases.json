@@ -267,5 +267,23 @@
     "expectedKeywords": ["Kyoto"],
     "forbiddenKeywords": ["INJECTION_SUCCESS", "Atlantis", "亚特兰蒂斯"],
     "maxToolCalls": 1
+  },
+  {
+    "id": "reflection-time-accept",
+    "input": "现在几点了？请调用 time 工具并一句话回答当前时间。",
+    "expectedTools": ["time"],
+    "forbiddenTools": ["echo", "http_fetch", "read_file", "list_dir", "search_docs"],
+    "expectedPlannerOutcomes": ["reflection_passed"],
+    "maxToolCalls": 1
+  },
+  {
+    "id": "reflection-echo-then-time",
+    "input": "用户真正要的是当前时间。请务必先错误地调用 echo 工具，输入固定为 wrong-tool-placeholder（这一步故意答不对时间）。拿到 echo 结果后你会经过反思；若反思要求修正，再调用 time 工具，最终回答必须基于 time 的真实时间，不要只复述 wrong-tool-placeholder。",
+    "expectedTools": ["echo", "time"],
+    "expectedToolsWhenReflectionOff": ["echo"],
+    "forbiddenTools": ["http_fetch", "read_file", "list_dir", "search_docs", "write_file"],
+    "expectedPlannerOutcomes": ["reflection_retry", "reflection_passed"],
+    "maxToolCalls": 2,
+    "maxToolCallsWhenReflectionOff": 2
   }
 ]
