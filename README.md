@@ -15,6 +15,7 @@
 - `docs/persistence-model.md`：持久化模型设计
 - `docs/postgres-setup.md`：本地 PostgreSQL 启动说明
 - `docs/evals-and-replay.md`：评测与回放说明
+- `docs/ci-setup.md`：**CI 结构、`HUNYUAN_API_KEY` 获取与验证、GitHub secret 配置**
 - `docs/http-api.md`：后端 HTTP API 说明
 - `docs/api-contract.md`：前后端共享 API 契约说明
 - `docs/time-handling.md`：时间存储与前端展示规范
@@ -47,7 +48,7 @@ pnpm install
 pnpm run dev
 ```
 
-在 `apps/api/.env` 中填入（**API Key 需在 [TokenHub 控制台](https://cloud.tencent.com/product/tokenhub) 创建**）：
+在 `apps/api/.env` 中填入（**API Key 需在 [TokenHub 控制台](https://cloud.tencent.com/product/tokenhub) 创建**；完整获取与验证步骤、以及 CI 里怎么配 secret，见 `docs/ci-setup.md`）：
 
 ```bash
 HUNYUAN_API_KEY=your_tokenhub_api_key

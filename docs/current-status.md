@@ -2,7 +2,7 @@
 
 这是项目的**唯一进度状态源**。做完一项就更新一项，其他文档只保留设计细节，不再各自维护「已完成 / 下一步」。
 
-最后更新：2026-10-27（E.16：补充重试策略学习笔记，功能验收状态不变）
+最后更新：2026-10-29（E.17：接入 GitHub Actions CI，新增 `docs/ci-setup.md`）
 
 ## 30 秒阅读指南
 
@@ -48,7 +48,7 @@
 | `进行中` | 已开工、未验收（开工后可手动标上） |
 | `未开始` | 还没做 |
 
-**当前开发重点（后端优先）：** 后端 E.1–E.16 已交付；下一项为 E.17 CI 接入 eval 回归；前端 Step 2/4/5 已完成（独立 `/tasks/[taskId]` 页可选）。
+**当前开发重点（后端优先）：** 后端 E.1–E.17 已交付；下一项为 E.18 请求级 `traceId`；前端 Step 2/4/5 已完成（独立 `/tasks/[taskId]` 页可选）。
 
 ---
 
@@ -121,7 +121,7 @@ AI / 协作者交付任务时：**聊天里说明 + 源码注释 + 合并前写�
 
 **路线：** 后端优先学习（见【E 节】与 `.cursor/rules/backend-first-learning.mdc`）。前端工作台仅辅助观察后端；日常用 `curl` + `evals:run` + `task:replay` 验证即可。
 
-**当前开发重点：** **E.16 重试与幂等策略** 已完成并通过全量 eval。**下一步：** 进入 E.17，为类型检查、构建、迁移与 eval 回归接入 CI。
+**当前开发重点：** **E.17 CI 接入 eval 回归** 已完成（`checks` 每次 PR 跑、`evals` 合并进 main 跑）。**下一步：** 进入 E.18，实现请求级 `traceId` 并接入结构化日志。
 
 **前端何时再动：**
 
@@ -1545,13 +1545,97 @@ curl -s -X POST http://localhost:3000/agent/run -H 'content-type: application/js
 
 ---
 
+### E.17 CI 接入 eval 回归
+
+| | |
+|--|--|
+| **状态** | 已完成 |
+| **目标** | 把类型检查、离线单测、前端构建与 eval 回归挂到 GitHub Actions；`evals:run` 早就是 CI 友好（DB 预检 + 失败 `exitCode=1`），缺的是真正的流水线 |
+| **改动范围** | 新增 `.github/workflows/ci.yml`、`docs/ci-setup.md`；更新本文件与 `README.md` 索引 |
+| **前置认知** | **CI 不需要自有服务器**：GitHub Actions 的 Postgres 是 job 生命周期内的**临时 service container（服务容器）**，跑完即销毁；GitHub 仍不能托管常驻数据库或常驻服务（那属 E.21 部署，需要外部平台） |
+
+#### 已交付
+
+| 项 | 说明 |
+|----|------|
+| **`checks` job** | 所有 push / PR / 手动触发都跑：`pnpm install --frozen-lockfile` → contract build → `pnpm run test`（E.16 的 7 个离线单测）→ `pnpm run check:all`（api `tsc --noEmit` + web lint/build）。**不碰网络、不碰 DB、不需要 secret** |
+| **`evals` job** | 仅在 push `main` / 手动触发时跑（`if: github.event_name != 'pull_request'`）：postgres:17 service container → `db:migrate` → `evals:run`；超时 25 分钟兜底 |
+| **服务容器** | `services.postgres` 带 `pg_isready` 健康检查，否则 `db:migrate` 会与 postgres 启动抢跑，报 `ECONNREFUSED` |
+| **密钥注入** | job 级 `env:` 注入 `HUNYUAN_API_KEY`（来自 Repository secret）等；**不创建 `.env` 文件**——已实测 `dotenv` 在 `.env` 缺失时静默跳过 |
+| **secret 预检** | 单独一步校验 `HUNYUAN_API_KEY` 非空，报错信息直接指向 `docs/ci-setup.md`，避免只看到一句 `Missing HUNYUAN_API_KEY` 猜不到是 CI 配置问题 |
+| **并发取消** | `concurrency.cancel-in-progress`：同分支连续推送时取消上一次未完成运行，省 private 仓库的免费分钟数 |
+| **报告留存** | `actions/upload-artifact` 在 `if: always()` 下上传 `eval-run-*.json`，失败时也能下载报告定位 case |
+| **固定环境** | CI 显式写死 `HUNYUAN_MODEL=qwen3.5-flash` + `AGENT_ORCHESTRATION=single`（qwen 不支持 Supervisor 的 `tool_choice=required`）；`multi-route-*` 用例被跳过属预期 |
+| **配置文档** | 新增 `docs/ci-setup.md`：TokenHub Key 获取与验证、Repository vs Environment secret、额度与排查表 |
+
+#### 测试方法
+
+**A. 本地预演 `checks` job（不需要 GitHub）**
+
+```bash
+cd /Users/lk/Documents/git/study/agent-app
+pnpm install --frozen-lockfile
+pnpm --filter @agent-app/api-contract build
+pnpm run test          # 预期：7/7 通过
+pnpm run check:all     # 预期：api tsc 无错；web lint + build 通过
+```
+
+**B. 本地预演 `evals` job（需本地 Postgres）**
+
+```bash
+docker compose -f apps/api/infra/postgres/compose.yaml up -d
+pnpm run db:migrate
+AGENT_ORCHESTRATION=single HUNYUAN_MODEL=qwen3.5-flash pnpm run evals:run
+# 预期：退出码 0；报告中 skipped 含 multi-route-*，failed: 0
+```
+
+**C. 真实流水线**
+
+1. 推送 `main`：`git push origin main`
+2. 打开仓库 **Actions** → `CI` → 最新运行
+3. 预期两个 job 绿：`Checks (types / unit tests / web build)`、`Eval regression (real LLM)`
+4. `evals` job 底部 **Artifacts** 应出现 `eval-report-<run_id>.zip`，解压即 `eval-run-*.json`
+5. 手动触发：Actions → `CI` → **Run workflow**
+
+**失败排查：**
+
+- `HUNYUAN_API_KEY secret 未配置` → 按 `docs/ci-setup.md` §3 重加（**Repository** secrets，不是 Environment secrets）
+- `ECONNREFUSED 127.0.0.1:5432` → healthcheck 被删或 postgres 启动慢
+- `401 invalid api key` → Key 用了旧混元地址签发的；本地用 `GET /v1/models` 验证同一值
+- eval 个别 case 失败但本地全绿 → 模型波动（已知 flakiness）；下载 artifact 取 `taskId`，本地 `pnpm run task:replay -- <taskId>` 复现
+- `doc-summary` 单独失败 → 该用例是唯一依赖**外网**的（真实抓取腾讯云文档页），CI 出网受限或页面改版都会挂，与流水线配置无关
+- 完整对照表见 [`docs/ci-setup.md` §6](ci-setup.md#6-失败排查)
+
+#### 学习要点
+
+1. **"CI 里跑数据库" ≠ "部署数据库"**：service container（服务容器）是 job 启动时拉起的临时容器，与 job 同生共死；不需要服务器，也不会持久化数据。真正的部署（7×24 可访问）GitHub 做不到。
+2. **CI 里没有 `.env`**：密钥走 repository secret → job `env`；`loadConfig()` 只读 `process.env`，dotenv 找不到文件时静默跳过，所以同一份代码本地与 CI 都能跑。
+3. **分层触发是对不确定性的工程妥协**：`checks` 是确定性的（类型/单测，慢也要每次跑）；`evals` 打真实 LLM，有模型波动和额度成本，所以只在 main 上跑。让 PR 的红线保持"可信"，否则团队会习惯性忽略。
+4. **`--frozen-lockfile` 是 CI 的锁**：没有它，`pnpm install` 可能按 semver 解析出与本地不同的版本，出现"本地能过、CI 挂了"的幽灵问题。
+5. **artifact（构建产物）是失败证据**：CI 的日志会滚动、会过期，报告落成 artifact 才能在 14 天内随时下载回查。
+6. **service container 不执行 `docker-entrypoint-initdb.d`**：本地 compose 挂载的初始化 SQL 在 CI 里不生效，建表必须完全依赖 `db:migrate`（迁移全部 `if not exists`，可重复执行）。
+
+#### 代码怎么读
+
+| 顺序 | 文件 | 看什么 |
+|------|------|--------|
+| 1 | `.github/workflows/ci.yml` | 文件头两段执行顺序；`jobs.checks` 的 7 个 step；`jobs.evals` 的 `if` / `services` / `env` / secret 预检 |
+| 2 | `docs/ci-setup.md` | TokenHub Key 来历与 `/v1/models` 验证、Repository secret 配置、失败排查表 |
+| 3 | `apps/api/src/scripts/run-evals.ts` | `process.exitCode = 1`（CI 靠它判失败）、`loadConfig()` 前置校验、模式 skip 逻辑 |
+| 4 | `apps/api/src/config/env.ts` | `loadConfig()` 的必需变量与默认值，理解 CI 只需注入少数几个 |
+| 5 | `apps/api/src/scripts/migrate-postgres.ts` | 迁移清单与幂等性（`if not exists`） |
+
+心智模型：`push main` → `checks`（install → build contract → test → check:all）→ 绿了才进 `evals`（起临时 postgres → migrate → evals:run → 上传报告）；PR 时 `evals` 被 `if` 直接跳过。
+
+---
+
 ### E.14+ 后端后续路线（候选，未选定优先动手项）
 
 | | |
 |--|--|
-| **状态** | 规划中（E.16 已完成并移至上方正式条目） |
-| **背景** | E.1–E.15 已交付；E.16 实现完成；其余候选见下表 |
-| **缺口复核（代码层面已确认，非猜测）** | `traceId` 仅在注释里提醒"别和 plannerTrace 混"，无实际实现；无 `.github/workflows` CI |
+| **状态** | 规划中（E.16 / E.17 已完成并移至上方正式条目） |
+| **背景** | E.1–E.17 已交付；其余候选见下表 |
+| **缺口复核（代码层面已确认，非猜测）** | `traceId` 仅在注释里提醒"别和 plannerTrace 混"，无实际实现（E.18 待做）；CI 已由 E.17 补齐 |
 
 #### P0：安全底线
 
@@ -1571,7 +1655,7 @@ curl -s -X POST http://localhost:3000/agent/run -H 'content-type: application/js
 
 | 编号 | 目标 | 为什么现在做 | 预估改动范围 |
 |----|------|-------------|--------------|
-| **E.17** | CI 接入 eval 回归 | `evals:run` 已 CI 友好（预检 + exitCode），但无实际流水线；有了鉴权/新工具后不能只靠"记得手动跑" | 新增 `.github/workflows/ci.yml`：起 postgres service → `db:migrate` → `evals:run` |
+| ~~E.17~~ | ~~CI 接入 eval 回归~~ | 已完成，见上方正式条目（`.github/workflows/ci.yml` + `docs/ci-setup.md`） | — |
 | **E.18** | 请求级 `traceId`（真正实现） | 命名位置已在【H 节】预留；实现后能把一次 HTTP 请求 → 多次 LLM 调用 → 多个工具执行串起来，为未来接 OTel 打基础 | `server.ts` 生成 `traceId` 注入 `logger.child`；**不进** `plannerTrace` / `metrics`（按命名约定避免混淆） |
 
 #### P3：可选加强（价值递减，按兴趣挑）
@@ -1585,7 +1669,7 @@ curl -s -X POST http://localhost:3000/agent/run -H 'content-type: application/js
 
 **排序逻辑：** P0 是"不做就有实际风险"且改动小、验收清晰；P1 是 Agent 工程"从能跑到耐用"的关键概念，复用现成 `plannerTrace`/eval 框架；P2 是收尾性质，不影响功能但项目体量到了该补；P3 都是"有更好、无也不影响主线"的增强项。
 
-**下一步：** 选定某一项后，把该条目状态改为 `进行中`，动手前先在此处细化「改动范围」，交付后按【E 节】固定四件套（已交付/测试方法/学习要点/代码怎么读）补齐，并把编号从本节移至上方正式条目。
+**下一步：** 按 P2 剩余项继续，首选 **E.18 请求级 `traceId`**（列入 P2 最后一项，实现后 P2 收尾完成）。选定后把该条目状态改为 `进行中`，动手前先在此处细化「改动范围」，交付后按【E 节】固定四件套（已交付/测试方法/学习要点/代码怎么读）补齐，并把编号从本节移至上方正式条目。
 
 ---
 
@@ -1610,6 +1694,8 @@ P11  E.12 Multi-Agent（Supervisor）      ← 已完成
 P12  E.13 HTTP API 鉴权 + 限流           ← 已完成
 P13  E.14 Prompt Injection 防护 + eval   ← 已完成
 P14  E.15 Reflection 自我校验循环        ← 已完成
+P15  E.16 LLM/工具重试 + 幂等门控         ← 已完成
+P16  E.17 CI 接入 eval 回归              ← 已完成
 ```
 
 前端 Step 2/4 **不阻塞** E.1–E.2、E.4；**E.3 / E.3.5 必须带前端**（E.3.5 为 Step 5 主验收）。
@@ -1708,6 +1794,7 @@ P14  E.15 Reflection 自我校验循环        ← 已完成
 | `docs/api-contract.md` | 共享契约说明 |
 | `docs/postgres-setup.md` | 本地数据库 |
 | `docs/evals-and-replay.md` | 评测与回放 |
+| **`docs/ci-setup.md`** | **E.17：CI 结构、TokenHub Key 获取与验证、GitHub secret 配置、失败排查** |
 | `docs/session-context.md` | 会话记忆策略（设计参考） |
 
 ---
@@ -1734,5 +1821,11 @@ pnpm run smoke:confirm
 pnpm run task:replay -- <taskId>
 
 # 类型与构建
+pnpm run check:all
+
+# E.17：本地预演 CI 的 checks job（不推 GitHub）
+pnpm install --frozen-lockfile
+pnpm --filter @agent-app/api-contract build
+pnpm run test
 pnpm run check:all
 ```

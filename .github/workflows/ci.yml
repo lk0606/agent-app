@@ -1,0 +1,159 @@
+# E.17：CI 回归流水线（类型检查 + 离线单测 + 前端构建 + eval 回归）
+#
+# 本文件执行顺序（调用方点名）：
+#   [1] checks  job：pnpm install → api-contract build → test → check:all，任何触发方式都跑
+#   [2] evals   job：等 [1] 绿 → Postgres service container 就绪 → db:migrate → evals:run
+#                   只在 push main / 手动触发时跑；PR 时被 if 条件跳过（省 LLM 额度）
+#
+# 两个 job 的分工与失败含义：
+#   checks 失败 = 代码本身有问题（类型/单测/lint/构建），必须修
+#   evals  失败 = 行为回归或模型波动，看 artifact 里的报告定位到具体 case
+#
+# 关于 Postgres：这是 GitHub 临时 runner 上的 service container（容器），
+# 只在本 job 生命周期内存在，job 结束即销毁。它**不是**"部署一个数据库"，
+# 也不需要任何自有服务器；本地开发仍用 apps/api/infra/postgres/compose.yaml。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # 手动触发：GitHub 页面 Actions → CI → Run workflow
+  workflow_dispatch:
+
+# 同一分支连续推送时取消上一次未完成的运行。
+# 动因：private 仓库每月有免费分钟数上限，排队中的旧运行没必要跑完。
+# 注意 concurrency 分组里带上 workflow 名，避免以后新增其它 workflow 时互相取消。
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── [1] 静态检查与离线单测：不碰网络、不碰数据库、不需要 API Key ──────────────
+  checks:
+    name: Checks (types / unit tests / web build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 不写 version：pnpm/action-setup@v4 会自动读根 package.json 的 packageManager 字段
+      # （pnpm@10.31.0）。两处同时写且版本不一致时该 action 会直接报错。
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          # 与 engines 的 >=20 对齐；22 是当前 LTS，Next.js 16 要求 Node >= 20.9
+          node-version: 22
+          # 缓存 pnpm store，命中后 install 从几分钟降到十几秒
+          cache: pnpm
+
+      # --frozen-lockfile：lockfile 与 package.json 不一致时直接失败，防止 CI 偷偷改依赖版本
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 先构建共享契约包：api / web 都从 @agent-app/api-contract 的 dist 里取类型
+      - name: Build shared contract
+        run: pnpm --filter @agent-app/api-contract build
+
+      # E.16 的 7 个离线单测（退避 / 错误分类 / 幂等门），零 LLM 成本
+      - name: Unit tests
+        run: pnpm run test
+
+      # check = api tsc --noEmit；check:web = next lint + next build
+      - name: Typecheck + web lint/build
+        run: pnpm run check:all
+
+  # ── [2] eval 回归：打真实 LLM，需 HUNYUAN_API_KEY secret ─────────────────────
+  evals:
+    name: Eval regression (real LLM)
+    # 方案 A：PR 不跑（模型有已知波动，避免把 PR 卡红）；合并进 main 后必跑
+    if: github.event_name != 'pull_request'
+    needs: checks
+    runs-on: ubuntu-latest
+    # 30 条 case × 真实 LLM 调用；超时兜底防止模型挂住把额度耗光
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        # 与本地 compose.yaml 同版本，避免 SQL 行为差异
+        image: postgres:17
+        env:
+          POSTGRES_USER: agent
+          POSTGRES_PASSWORD: agent
+          POSTGRES_DB: agent_app
+        ports:
+          - 5432:5432
+        # 健康检查通过后 GitHub 才开始跑 steps；
+        # 否则 db:migrate 会和 postgres 启动抢跑，报 ECONNREFUSED
+        options: >-
+          --health-cmd "pg_isready -U agent -d agent_app"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    # job 级环境变量：migrate / evals 两个脚本都靠 loadConfig() 读这里
+    # 注意 CI 里没有 apps/api/.env（该文件不入库），全部靠下面的 env 注入
+    env:
+      DATABASE_URL: postgres://agent:agent@127.0.0.1:5432/agent_app
+      HUNYUAN_API_KEY: ${{ secrets.HUNYUAN_API_KEY }}
+      # 与本地 apps/api/.env 保持一致（获取经验见 docs/ci-setup.md）
+      HUNYUAN_MODEL: qwen3.5-flash
+      HUNYUAN_BASE_URL: https://tokenhub.tencentmaas.com/v1
+      # qwen3.5-flash 不支持 Supervisor 的 tool_choice=required，必须 single；
+      # single 下 multi-route-* 用例会被自动跳过（属预期，不是失败）
+      AGENT_ORCHESTRATION: single
+      # 显式写死本次关注的开关，避免以后改 .env.example 默认值悄悄改变 CI 语义
+      AGENT_REFLECTION: "true"
+      PROMPT_INJECTION_GUARD: "true"
+      SEARCH_DOCS_MODE: keyword
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 不写 version：pnpm/action-setup@v4 会自动读根 package.json 的 packageManager 字段
+      # （pnpm@10.31.0）。两处同时写且版本不一致时该 action 会直接报错。
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 提前拦截「secret 忘了配」这种最常见失败，给出可操作提示，
+      # 否则会在 db:migrate 处报一句 Missing HUNYUAN_API_KEY，看不出是 CI 配置问题
+      - name: Verify HUNYUAN_API_KEY secret
+        run: |
+          if [ -z "${HUNYUAN_API_KEY}" ]; then
+            echo "::error::HUNYUAN_API_KEY secret 未配置。配置步骤见 docs/ci-setup.md（Repository secrets，不是 Environment secrets）"
+            exit 1
+          fi
+
+      # 迁移脚本内的 SQL 均为 if not exists，可重复执行；本地与 CI 走同一条路径
+      - name: Run database migrations
+        run: pnpm run db:migrate
+
+      # 有失败 case 时脚本自身 exitCode=1，本 step 随之失败
+      - name: Run eval regression
+        run: pnpm run evals:run
+
+      # 无论成败都上传报告：失败时靠它看哪个 case 挂了、taskId 是多少
+      # 本地等价操作：pnpm run task:replay -- <报告里的 taskId>
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report-${{ github.run_id }}
+          path: apps/api/evals/reports/eval-run-*.json
+          retention-days: 14
+          # 报告目录可能为空（例如 install 就失败了），此时不因找不到文件而二次报错
+          if-no-files-found: warn
