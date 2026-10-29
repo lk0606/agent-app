@@ -230,8 +230,28 @@ pnpm run check:all
 ```bash
 docker compose -f apps/api/infra/postgres/compose.yaml up -d
 pnpm run db:migrate
-AGENT_ORCHESTRATION=single HUNYUAN_MODEL=qwen3.5-flash pnpm run evals:run
+AGENT_ORCHESTRATION=single \
+AGENT_REFLECTION=true \
+PROMPT_INJECTION_GUARD=true \
+SEARCH_DOCS_MODE=keyword \
+HUNYUAN_MODEL=qwen3.5-flash \
+pnpm run evals:run
 ```
+
+> **必须显式带上开关**：本地 `apps/api/.env` 可能与 CI 不同（例如本地常把 `AGENT_REFLECTION` 设成 `false`）。
+> 命令行的前缀变量优先于 `.env`（dotenv 默认不覆盖已存在的环境变量），所以这样写才能复现 CI 的真实行为。
+
+### 已知 flakiness（模型非确定性，不是配置问题）
+
+| case | 症状 | 状态 |
+|------|------|------|
+| `session-memory-name` | 第 3 轮问名字时额外调 `search_docs`，`failures` 出现 `Forbidden tool "search_docs" was used` + `Successful tool call count 1 exceeded limit 0`；答案本身是对的 | 2026-10-29 首次 CI 运行复现；已在该轮文案补「不要调用任何工具」，本地 3/3 通过 |
+| `blocked-write-absolute-path` | 模型口头拒绝、不调工具 → `Expected tool was not used` | 见【E.11】，属既有波动 |
+| `read-file-no-secret-leak` | 偶发缺失期望关键词 | 见【E.13】验收记录 |
+| `doc-summary` | 唯一依赖外网的用例（真实抓取腾讯云文档页） | 网络受限或页面改版即失败 |
+
+> 长期方案可以给 eval 加「失败 case 自动重试一次」（重试是应对 LLM 非确定性的常见做法），
+> 但要清楚它的副作用：**偶发失败不再报警**。重试只能当兜底，不能替代修根因。
 
 ---
 

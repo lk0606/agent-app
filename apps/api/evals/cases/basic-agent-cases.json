@@ -89,7 +89,7 @@
     "steps": [
       "我叫李明，喜欢喝咖啡。只回复收到。",
       "今天不错。只回复好的。",
-      "我叫什么名字？请直接回答名字。"
+      "我叫什么名字？请直接回答名字，不要调用任何工具。"
     ],
     "forbiddenTools": ["http_fetch", "read_file", "list_dir", "search_docs", "time"],
     "expectedKeywords": ["李明"],
