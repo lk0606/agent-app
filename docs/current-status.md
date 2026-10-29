@@ -2,7 +2,7 @@
 
 这是项目的**唯一进度状态源**。做完一项就更新一项，其他文档只保留设计细节，不再各自维护「已完成 / 下一步」。
 
-最后更新：2026-08-14（E.15：Reflection 自我校验循环 + 专项 eval，已完成）
+最后更新：2026-10-27（E.16：补充重试策略学习笔记，功能验收状态不变）
 
 ## 30 秒阅读指南
 
@@ -48,7 +48,7 @@
 | `进行中` | 已开工、未验收（开工后可手动标上） |
 | `未开始` | 还没做 |
 
-**当前开发重点（后端优先）：** 后端 E.1–E.15 已交付；前端 Step 2/4/5 已完成（独立 `/tasks/[taskId]` 页可选）；**下一阶段候选见 [E.14+ 后端后续路线](#e14-后端后续路线候选未选定优先动手项)**。
+**当前开发重点（后端优先）：** 后端 E.1–E.16 已交付；下一项为 E.17 CI 接入 eval 回归；前端 Step 2/4/5 已完成（独立 `/tasks/[taskId]` 页可选）。
 
 ---
 
@@ -121,7 +121,7 @@ AI / 协作者交付任务时：**聊天里说明 + 源码注释 + 合并前写�
 
 **路线：** 后端优先学习（见【E 节】与 `.cursor/rules/backend-first-learning.mdc`）。前端工作台仅辅助观察后端；日常用 `curl` + `evals:run` + `task:replay` 验证即可。
 
-**当前开发重点：** **E.15 Reflection 自我校验** 已交付。**下一步：** 从 [E.14+](#e14-后端后续路线候选未选定优先动手项) 选 E.16 重试 / E.17 CI / E.18 traceId 等。
+**当前开发重点：** **E.16 重试与幂等策略** 已完成并通过全量 eval。**下一步：** 进入 E.17，为类型检查、构建、迁移与 eval 回归接入 CI。
 
 **前端何时再动：**
 
@@ -1532,15 +1532,26 @@ curl -s -X POST http://localhost:3000/agent/run -H 'content-type: application/js
 
 心智模型：`plan/tool → 草稿 answer → reflect → (pass 交稿 | retry + critique 再 plan)`。展开读码顺序见 [`reflection-notes.md`](backend-learning/reflection-notes.md)。
 
+#### E.16：LLM 重试退避 + 幂等工具安全重试（已完成）
+
+| | |
+|--|--|
+| **状态** | 已完成：实现、7 个专项测试、`check:all` 与全量 eval 均通过 |
+| **已交付** | 新增可取消的 full-jitter 指数退避；Chat Completions 仅重试 408/429/5xx/网络瞬态错误并支持有上限的 `Retry-After`，流式首 token 后禁止重试；OpenAI Chat/Embedding SDK 内建重试显式关闭；Tool 契约增加必填 `idempotent`，仅幂等工具的 `NETWORK_ERROR` 重试；`http_fetch` 改为单次 GET + Planner 统一重试并合并任务取消/单次超时；`write_file`、`wait`、`search_docs` 不做 Planner 自动重试；embedding 支持任务取消 |
+| **测试方法** | `pnpm run test`：7/7 通过，覆盖指数退避、错误分类、`Retry-After`、真实 `http_fetch` 幂等声明、幂等/非幂等边界与取消；`pnpm run check:all`：API 类型检查、Web lint/build 均通过；启动项目 PostgreSQL 并执行 `pnpm run db:migrate && pnpm run evals:run`：迁移与全量 eval 通过（退出码 0） |
+| **学习要点** | `maxRetries` 是首次调用之外的次数；SDK 重试与业务重试只能保留一层；幂等性是允许重试的必要条件但还需瞬态错误分类；取消信号必须同时打断 HTTP attempt 与 backoff sleep；流式输出以“首 token 是否已对外发送”为不可重放边界；attempt 日志与业务 `tool_calls` 分层，避免污染预算/eval/时间线 |
+| **代码怎么读** | 先读 `shared/retry.ts` 的通用循环 → `hunyuan-llm-client.ts` 的 LLM 错误判定/流式边界 → `tool.ts` 与 `tool-retry.ts` 的安全门 → `planner-agent.ts` 确认后执行、最终一次落库 → `http-fetch-tool.ts` 的状态码/取消分类 → `config/env.ts` 与 `create-agent-runtime.ts` 的配置注入 → `test/e16-retry.test.ts` 的验收样例 |
+| **学习笔记** | [`docs/backend-learning/retry-notes.md`](backend-learning/retry-notes.md)：名词解释、退避公式与示例、幂等安全边界、embedding 取消链路、读码顺序与复习自检 |
+
 ---
 
 ### E.14+ 后端后续路线（候选，未选定优先动手项）
 
 | | |
 |--|--|
-| **状态** | 规划中（E.15 已从候选转正式完成） |
-| **背景** | E.1–E.15 已覆盖 Reflection；其余候选见下表 |
-| **缺口复核（代码层面已确认，非猜测）** | 全仓库无 `retry`/`429`/`backoff`；`traceId` 仅在注释里提醒"别和 plannerTrace 混"，无实际实现；无 `.github/workflows` CI |
+| **状态** | 规划中（E.16 已完成并移至上方正式条目） |
+| **背景** | E.1–E.15 已交付；E.16 实现完成；其余候选见下表 |
+| **缺口复核（代码层面已确认，非猜测）** | `traceId` 仅在注释里提醒"别和 plannerTrace 混"，无实际实现；无 `.github/workflows` CI |
 
 #### P0：安全底线
 
@@ -1554,7 +1565,7 @@ curl -s -X POST http://localhost:3000/agent/run -H 'content-type: application/js
 | 编号 | 目标 | 为什么现在做 | 预估改动范围 |
 |----|------|-------------|--------------|
 | ~~E.15~~ | ~~Reflection 自我校验循环~~ | 已完成，见上方正式条目 | — |
-| **E.16** | LLM 调用重试退避 + 工具重试策略 | 混元/TokenHub 偶发限流或超时目前直接失败，无工程兜底；需区分幂等工具（`read_file` 可重试）与非幂等工具（`write_file` 不可重试） | `hunyuan-llm-client.ts` 加指数退避；`tool.ts` 接口加 `idempotent` 标记 |
+| ~~E.16~~ | ~~LLM 调用重试退避 + 工具重试策略~~ | 已完成，见上方正式条目 | — |
 
 #### P2：工程化收尾
 
@@ -1686,6 +1697,7 @@ P14  E.15 Reflection 自我校验循环        ← 已完成
 | **`docs/backend-learning/task-metrics-notes.md`** | **E.9：metrics / plannerTrace / traceId；估费野路子** |
 | **`docs/backend-learning/multi-agent-notes.md`** | **E.12：Supervisor / 专家 / 测试与验收** |
 | **`docs/backend-learning/reflection-notes.md`** | **E.15：Reflection 读码顺序 / 坑点 / 验证** |
+| **[`docs/backend-learning/retry-notes.md`](backend-learning/retry-notes.md)** | **E.16：重试术语 / 公式 / 幂等 / 任务取消 / 读码与自检** |
 | **`docs/backend-learning/`** | HTTP body / Agent 全链路 / Debug / 400 details 概念笔记 |
 | **`docs/consolidation-week.md`** | **E.5 巩固周完整手册**（Day 1–5 详细任务） |
 | `docs/fullstack-frontend-plan.md` | 前后端技术选型与 Step 设计 |

@@ -22,6 +22,7 @@ import OpenAI from "openai";
 
 import { AppError } from "../shared/app-error.js";
 import type { Logger } from "../shared/logger.js";
+import { withRetry } from "../shared/retry.js";
 import { rethrowIfLlmAborted, throwIfAborted } from "../runtime/abort-utils.js";
 import { readLlmTokenUsage, type LlmCallMetrics, type LlmTokenUsage } from "../runtime/task-metrics.js";
 import type {
@@ -52,11 +53,17 @@ export class HunyuanLlmClient implements LlmClient {
       logger?: Logger;
       /** 学习期观测：为 true 时日志附「包装前 / 包装后」文本片段（PROMPT_INJECTION_GUARD_DEBUG） */
       promptInjectionGuardDebug?: boolean;
+      /** E.16：首次请求之外的额外重试次数 */
+      maxRetries?: number;
+      retryBaseDelayMs?: number;
+      retryMaxDelayMs?: number;
     },
   ) {
     this.client = new OpenAI({
       apiKey: options.apiKey,
       baseURL: options.baseURL,
+      // E.16：避免 SDK 默认重试与项目重试相乘，HTTP attempt 只由 withLlmRetry 控制。
+      maxRetries: 0,
     });
   }
 
@@ -126,7 +133,7 @@ export class HunyuanLlmClient implements LlmClient {
 
     try {
       // 1. 调混元 chat.completions：system 规则 + user 上下文 + tools 定义
-      const completion = await this.client.chat.completions.create({
+      const completion = await this.withLlmRetry("plan", input.signal, () => this.client.chat.completions.create({
         model: this.options.model,
         ...this.getModelCompatibilityOptions(),
         messages: [
@@ -231,7 +238,7 @@ export class HunyuanLlmClient implements LlmClient {
         ],
         // TokenHub 兼容接口只接受 auto；下一项约束由上方 visibleTools 实现。
         tool_choice: "auto",
-      }, { signal: input.signal });
+      }, { signal: input.signal }));
 
       usage = readLlmTokenUsage(completion.usage);
 
@@ -322,47 +329,60 @@ export class HunyuanLlmClient implements LlmClient {
       ];
 
       if (options?.onToken) {
-        const stream = await this.client.chat.completions.create(
-          {
-            model: this.options.model,
-            ...this.getModelCompatibilityOptions(),
-            messages,
-            stream: true,
-            // 流式默认不带 usage；打开后末包会带 usage，供 E.9 成本统计
-            stream_options: { include_usage: true },
-          },
-          { signal: input.signal },
-        );
+        const onToken = options.onToken;
+        let tokenEmitted = false;
+        return await withRetry(async () => {
+          const stream = await this.client.chat.completions.create(
+            {
+              model: this.options.model,
+              ...this.getModelCompatibilityOptions(),
+              messages,
+              stream: true,
+              // 流式默认不带 usage；打开后末包会带 usage，供 E.9 成本统计
+              stream_options: { include_usage: true },
+            },
+            { signal: input.signal },
+          );
 
-        let answer = "";
+          let answer = "";
+          for await (const chunk of stream) {
+            throwIfAborted(input.signal);
+            if (chunk.usage) {
+              usage = readLlmTokenUsage(chunk.usage);
+            }
 
-        for await (const chunk of stream) {
-          // stream 迭代中途协作退出；SDK 在 signal abort 时也会抛，catch 里 rethrowIfLlmAborted
-          throwIfAborted(input.signal);
-
-          if (chunk.usage) {
-            usage = readLlmTokenUsage(chunk.usage);
+            const delta = chunk.choices[0]?.delta?.content;
+            if (typeof delta === "string" && delta.length > 0) {
+              tokenEmitted = true;
+              answer += delta;
+              onToken(delta);
+            }
           }
 
-          const delta = chunk.choices[0]?.delta?.content;
-
-          if (typeof delta === "string" && delta.length > 0) {
-            answer += delta;
-            options.onToken(delta);
-          }
-        }
-
-        return answer.length > 0 ? answer : "The model returned an empty response.";
+          return answer.length > 0 ? answer : "The model returned an empty response.";
+        }, {
+          maxRetries: this.options.maxRetries ?? 2,
+          baseDelayMs: this.options.retryBaseDelayMs ?? 250,
+          maxDelayMs: this.options.retryMaxDelayMs ?? 4000,
+          signal: input.signal,
+          // 首个 delta 已推送给 SSE 后禁止从头重放，避免客户端看到重复文本。
+          shouldRetry: (error) => !tokenEmitted && isRetryableLlmError(error),
+          getRetryAfterMs: readRetryAfterMs,
+          onRetry: ({ attempt, maxAttempts, delayMs, error }) => this.options.logger?.info(
+            "LLM request retry scheduled",
+            { purpose: "answer_stream", attempt, maxAttempts, delayMs, reason: summarizeRetryError(error) },
+          ),
+        });
       }
 
-      const completion = await this.client.chat.completions.create(
+      const completion = await this.withLlmRetry("answer", input.signal, () => this.client.chat.completions.create(
         {
           model: this.options.model,
           ...this.getModelCompatibilityOptions(),
           messages,
         },
         { signal: input.signal },
-      );
+      ));
 
       usage = readLlmTokenUsage(completion.usage);
       const message = completion.choices[0]?.message;
@@ -381,7 +401,7 @@ export class HunyuanLlmClient implements LlmClient {
     let usage: LlmTokenUsage | null = null;
 
     try {
-      const completion = await this.client.chat.completions.create(
+      const completion = await this.withLlmRetry("summarize", input.signal, () => this.client.chat.completions.create(
         {
           model: this.options.model,
           ...this.getModelCompatibilityOptions(),
@@ -409,7 +429,7 @@ export class HunyuanLlmClient implements LlmClient {
           ],
         },
         { signal: input.signal },
-      );
+      ));
 
       usage = readLlmTokenUsage(completion.usage);
       const message = completion.choices[0]?.message;
@@ -451,7 +471,7 @@ export class HunyuanLlmClient implements LlmClient {
 
       // 与 routeSpecialty 一样用「虚拟 function」收结构化裁决；不是业务 Tool，不会进 tool_calls。
       // accept_draft / revise_plan 二选一 → Planner 映射成 reflection_passed / reflection_retry。
-      const completion = await this.client.chat.completions.create(
+      const completion = await this.withLlmRetry("reflect", input.signal, () => this.client.chat.completions.create(
         {
           model: this.options.model,
           ...this.getModelCompatibilityOptions(),
@@ -523,8 +543,8 @@ export class HunyuanLlmClient implements LlmClient {
           tool_choice: "auto",
         },
         { signal: input.signal },
-      );
- 
+      ));
+
       usage = readLlmTokenUsage(completion.usage);
       const toolCall = completion.choices[0]?.message?.tool_calls?.[0];
 
@@ -578,7 +598,7 @@ export class HunyuanLlmClient implements LlmClient {
         .map((item) => `- ${item.id}: ${item.description}`)
         .join("\n");
 
-      const completion = await this.client.chat.completions.create(
+      const completion = await this.withLlmRetry("route", input.signal, () => this.client.chat.completions.create(
         {
           model: this.options.model,
           ...this.getModelCompatibilityOptions(),
@@ -623,7 +643,7 @@ export class HunyuanLlmClient implements LlmClient {
           tool_choice: "required",
         },
         { signal: input.signal },
-      );
+      ));
 
       usage = readLlmTokenUsage(completion.usage);
       const toolCall = completion.choices[0]?.message?.tool_calls?.[0];
@@ -647,6 +667,27 @@ export class HunyuanLlmClient implements LlmClient {
     } finally {
       this.emitLlmCall(input.onLlmCall, "route", usage, startedAt);
     }
+  }
+
+  /** E.16：所有 Chat Completions 共用同一套可取消重试，指标仍按一次逻辑 LLM 调用统计。 */
+  private withLlmRetry<T>(purpose: string, signal: AbortSignal | undefined, operation: () => Promise<T>): Promise<T> {
+    return withRetry(() => operation(), {
+      maxRetries: this.options.maxRetries ?? 2,
+      baseDelayMs: this.options.retryBaseDelayMs ?? 250,
+      maxDelayMs: this.options.retryMaxDelayMs ?? 4000,
+      signal,
+      shouldRetry: isRetryableLlmError,
+      getRetryAfterMs: readRetryAfterMs,
+      onRetry: ({ attempt, maxAttempts, delayMs, error }) => {
+        this.options.logger?.info("LLM request retry scheduled", {
+          purpose,
+          attempt,
+          maxAttempts,
+          delayMs,
+          reason: summarizeRetryError(error),
+        });
+      },
+    });
   }
 
   /**
@@ -830,4 +871,71 @@ function stringifyError(error: unknown): string {
   }
 
   return String(error);
+}
+
+type HttpLikeError = Error & {
+  status?: number;
+  code?: string;
+  headers?: Headers | Record<string, string | undefined>;
+};
+
+export function isRetryableLlmError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const candidate = error as HttpLikeError;
+  if (candidate.status !== undefined) {
+    return candidate.status === 408 || candidate.status === 429 || candidate.status >= 500;
+  }
+
+  const code = candidate.code?.toLowerCase() ?? "";
+  const message = candidate.message.toLowerCase();
+  // Node/操作系统常见的临时网络错误：
+  // ECONNRESET：已建立的连接被对端重置；ECONNREFUSED：目标端口暂时拒绝连接；
+  // ETIMEDOUT：连接或读写超时；ENOTFOUND：DNS 找不到主机；EAI_AGAIN：DNS 临时解析失败，稍后可能恢复。
+  const transientNetworkCodes = ["econnreset", "econnrefused", "etimedout", "enotfound", "eai_again"];
+  // 某些 fetch/OpenAI SDK 错误没有稳定 code，因此再用消息关键词兼容识别。
+  return transientNetworkCodes.includes(code)
+    || message.includes("network")
+    || message.includes("connection")
+    || message.includes("fetch failed")
+    || message.includes("timed out");
+}
+
+export function readRetryAfterMs(error: unknown): number | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  const headers = (error as HttpLikeError).headers;
+  const raw = headers instanceof Headers
+    ? headers.get("retry-after")
+    : headers?.["retry-after"] ?? headers?.["Retry-After"];
+
+  if (!raw) {
+    return null;
+  }
+
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+
+  const dateMs = Date.parse(raw);
+  return Number.isFinite(dateMs) ? Math.max(0, dateMs - Date.now()) : null;
+}
+
+function summarizeRetryError(error: unknown): { name: string; status?: number; code?: string; message: string } {
+  if (!(error instanceof Error)) {
+    return { name: "UnknownError", message: String(error).slice(0, 240) };
+  }
+
+  const candidate = error as HttpLikeError;
+  return {
+    name: error.name,
+    ...(candidate.status === undefined ? {} : { status: candidate.status }),
+    ...(candidate.code === undefined ? {} : { code: candidate.code }),
+    message: error.message.slice(0, 240),
+  };
 }

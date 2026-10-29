@@ -27,8 +27,15 @@ export interface AppConfig {
   sessionHistoryMessageLimit: number;
   sessionHistoryCharBudget: number;
   httpFetchTimeoutMs: number;
-  httpFetchRetries: number;
   httpFetchMaxChars: number;
+  /** E.16：首次 LLM 请求之外的额外重试次数 */
+  llmMaxRetries: number;
+  llmRetryBaseDelayMs: number;
+  llmRetryMaxDelayMs: number;
+  /** E.16：仅用于声明为幂等且抛 NETWORK_ERROR 的工具 */
+  toolMaxRetries: number;
+  toolRetryBaseDelayMs: number;
+  toolRetryMaxDelayMs: number;
   httpFetchMaxResponseBytes: number;
   httpFetchAllowedContentTypes: string[];
   httpFetchAllowHosts: string[];
@@ -132,8 +139,14 @@ export function loadConfig(): AppConfig {
     sessionHistoryMessageLimit: readNumber("SESSION_HISTORY_MESSAGE_LIMIT", 8),
     sessionHistoryCharBudget: readNumber("SESSION_HISTORY_CHAR_BUDGET", 4000),
     httpFetchTimeoutMs: readNumber("HTTP_FETCH_TIMEOUT_MS", 8000),
-    httpFetchRetries: readNumber("HTTP_FETCH_RETRIES", 2),
     httpFetchMaxChars: readNumber("HTTP_FETCH_MAX_CHARS", 4000),
+    // E.16：maxRetries 是首次调用之外的额外次数，0 可完全关闭。
+    llmMaxRetries: readNonNegativeInteger("LLM_MAX_RETRIES", 2),
+    llmRetryBaseDelayMs: readNumber("LLM_RETRY_BASE_DELAY_MS", 250),
+    llmRetryMaxDelayMs: readNumber("LLM_RETRY_MAX_DELAY_MS", 4000),
+    toolMaxRetries: readNonNegativeInteger("TOOL_MAX_RETRIES", 2),
+    toolRetryBaseDelayMs: readNumber("TOOL_RETRY_BASE_DELAY_MS", 100),
+    toolRetryMaxDelayMs: readNumber("TOOL_RETRY_MAX_DELAY_MS", 2000),
     httpFetchMaxResponseBytes: readNumber("HTTP_FETCH_MAX_RESPONSE_BYTES", 12000),
     httpFetchAllowedContentTypes: readList(
       "HTTP_FETCH_ALLOWED_CONTENT_TYPES",
@@ -191,6 +204,18 @@ function readNumber(name: string, fallback: number): number {
   }
 
   return parsed;
+}
+
+/** 允许 0；重试次数必须是整数，负数 / 小数 / NaN 回退默认。 */
+function readNonNegativeInteger(name: string, fallback: number): number {
+  const value = process.env[name];
+
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 /** 允许 0（免费模型学习场景）；负数 / NaN 回退默认 */

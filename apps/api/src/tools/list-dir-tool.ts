@@ -10,6 +10,7 @@ import type { Tool, ToolInput } from "./tool.js";
 
 export class ListDirTool implements Tool {
   readonly name = "list_dir";
+  readonly idempotent = true;
   readonly description =
     "Lists files and subdirectories inside the configured sandbox directory. Pass a relative path such as . or notes, or leave empty for the sandbox root.";
 

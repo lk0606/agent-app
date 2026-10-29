@@ -1,0 +1,75 @@
+---
+description: 写手测用例/验收手册时，每条必须自包含、可直接复制执行，并给出可度量的通过与失败判据
+alwaysApply: false
+---
+
+# 可复制的手测用例
+
+适用场景：写手动测试用例、验收清单、smoke 步骤、`docs/*-manual-tests.md` 这类执行手册。
+
+核心目标：**读者复制一条就能跑出结果，并且能自己判断对错。** 不是把测试意图写在文档里就算完成。
+
+## 硬性要求
+
+1. **每条用例自包含**：一个代码块 = `cd`（需要时）+ 变量 + 请求 + 结果提取 + 摘要输出。单独粘到任意终端即可执行，不依赖之前跑过的命令、函数或变量。
+2. **禁止共享 helper**：不要让读者先跑一段 `run_case(){...}` 或“准备块”。多终端场景就写多个块，每块各自完整。
+3. **多终端分开写**：需要重启服务的用例，把「终端 A：服务启动」和「终端 B：测试请求」写成两个独立块，各自从完整命令开始。
+4. **改配置必须给完整重启命令**：用内联环境变量（`TOOL_MAX_RETRIES=0 pnpm run dev:server`），并提示先 `Ctrl+C`、跑完恢复原配置。
+5. **每块末尾打印摘要**：状态、错误码、关键计数、outcome。不要让读者在整段 JSON 里肉眼找字段。
+6. **路径唯一**：日志/结果文件带用例编号（如 `/tmp/e16-case03.log`），避免重复执行或并行执行互相覆盖。
+7. **只用已确认存在的依赖**：优先 `curl` + `grep`/`sed` + `node`（本项目 Node ≥ 20）；不要默认 `jq` 已安装。
+
+## 每条用例必须包含
+
+| 部分 | 要求 |
+|------|------|
+| 前置 | 服务、数据库、模型、是否需要重启、需要哪些环境变量 |
+| 执行块 | 可直接复制的完整命令 |
+| 判据（✅） | 具体字段值、日志条数、SSE 事件、记录条数 |
+| 判据（❌） | 常见错误现象 → 原因（如“0 条重试日志 = 错误分类过严”） |
+| 无效判定 | 例如“SSE 没有 `tool_start` 说明模型没选工具，该次不算验证” |
+
+## 判据必须可度量
+
+- 日志：给 `"message"` 原文 + `meta` 关键字段（`attempt` / `maxAttempts` / `errorCode`），**说明条数**
+- SSE：给事件序列（`tool_start` → `tool_end` / `error`）
+- API / 数据库：给字段名与条数；明确“一次逻辑调用一条记录”这类分层结论
+- 禁止：只给命令不给预期；“应该没问题”“看起来正常”这类模糊表述
+- 禁止：预期依赖随机值（如要求 `delayMs` 递增或等于某个固定数）
+
+## 外部依赖先实测
+
+- 引用公网站点前，先用 `curl -o /dev/null -w '%{http_code} %{content_type}'` 实测状态码与内容类型，再写进判据
+- 站点可能不可达，给出等价备用站点（如 `httpbin.org` ↔ `httpbingo.org`）
+- 区分“本服务返回的状态码”和“被测上游返回的状态码”（例如 429 是本服务限流，还是上游限流）
+
+## 交付前自检
+
+1. 单独复制每条块到新终端，能否直接得到输出？
+2. 全文代码块过一遍 `bash -n` / `zsh -n`（可用 awk 抽取代码块后检查）？
+3. 每条都有 ✅ / ❌，且数值具体？
+4. 需要重启的用例，是否写清“先 Ctrl+C、再复制、跑完恢复”？
+5. 是否还存在跨块依赖的变量或函数（必须消除）？
+
+## 示例：消除共享 helper
+
+❌ 依赖前置块（单独复制这条会失败）：
+
+```bash
+# 需要先跑过准备块里的 run_case 函数
+run_case "请务必调用 http_fetch 工具读取 https://example.com "
+```
+
+✅ 单条自包含：
+
+```bash
+BASE='http://localhost:3000'; TOKEN=''
+LOG=/tmp/demo-case01.log
+curl -N -sS -X POST "$BASE/agent/stream" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
+  --data '{"input":"请务必调用 http_fetch 工具读取 https://example.com "}' | tee "$LOG"
+TASK_ID=$(grep -o '"taskId":"[^"]*"' "$LOG" | head -1 | sed 's/.*"taskId":"//;s/"$//')
+curl -sS -H "Authorization: Bearer $TOKEN" "$BASE/tasks/$TASK_ID" -o /tmp/demo-case01.json
+node -e 'const r=require("/tmp/demo-case01.json");console.log("task="+(r.task&&r.task.status),"errorCode="+(r.task&&r.task.errorCode))'
+```

@@ -6,6 +6,7 @@ import {
   emitTokenStream,
 } from "../runtime/agent-stream.js";
 import { AppError } from "../shared/app-error.js";
+import { executeToolWithRetry } from "../tools/tool-retry.js";
 import type { Agent, AgentContext, AgentRequest, AgentResponse } from "./base-agent.js";
 
 type LlmConversationMessage = {
@@ -50,6 +51,10 @@ export class PlannerAgent implements Agent {
       reflectionEnabled?: boolean;
       /** E.15：拒绝草稿后最多再规划几次 */
       reflectionMaxRetries?: number;
+      /** E.16：幂等工具遇到 NETWORK_ERROR 时的额外重试次数与退避窗口 */
+      toolMaxRetries?: number;
+      toolRetryBaseDelayMs?: number;
+      toolRetryMaxDelayMs?: number;
     },
   ) {}
 
@@ -429,11 +434,20 @@ export class PlannerAgent implements Agent {
 
       try {
         // G. 执行工具 → outcome: tool_executed（成功路径）
-        const toolOutput = await tool.execute({
-          input: toolInput,
-          // E.8：把任务 AbortSignal 传给工具，wait 等可中断工具才能中途停下
-          signal: context.signal,
-        });
+        const toolOutput = await executeToolWithRetry(
+          tool,
+          {
+            input: toolInput,
+            // E.8：把任务 AbortSignal 传给工具，wait 等可中断工具才能中途停下
+            signal: context.signal,
+          },
+          {
+            maxRetries: this.options.toolMaxRetries ?? 2,
+            baseDelayMs: this.options.toolRetryBaseDelayMs ?? 100,
+            maxDelayMs: this.options.toolRetryMaxDelayMs ?? 2000,
+            logger: context.logger,
+          },
+        );
 
         throwIfAborted(context.signal);
 

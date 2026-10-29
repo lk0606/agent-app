@@ -7,12 +7,15 @@ import type { Tool, ToolInput } from "./tool.js";
 
 export class HttpFetchTool implements Tool {
   readonly name = "http_fetch";
+  // idempotent 表示“幂等”：同一操作执行一次或重复执行，对业务状态的预期影响等价，不累积额外副作用。
+  // 本工具固定使用 GET、不发送请求体，按 HTTP 语义声明为幂等；不代表每次网页内容必须相同。
+  // true 只是允许 Planner 在 NETWORK_ERROR 时重试；BAD_REQUEST、取消、超时仍不会重试。
+  readonly idempotent = true;
   readonly description = "Fetches a web page and returns a compact plain-text summary source for reading and summarization tasks.";
 
   constructor(
     private readonly options: {
       timeoutMs: number;
-      retries: number;
       maxChars: number;
       maxResponseBytes: number;
       allowedContentTypes: string[];
@@ -24,56 +27,60 @@ export class HttpFetchTool implements Tool {
   async execute(input: ToolInput): Promise<string> {
     const url = this.extractUrl(input.input);
     this.validateUrl(url);
-    let lastError: unknown;
+    const timeoutSignal = AbortSignal.timeout(this.options.timeoutMs);
+    const signal = input.signal ? AbortSignal.any([input.signal, timeoutSignal]) : timeoutSignal;
 
-    for (let attempt = 1; attempt <= this.options.retries + 1; attempt += 1) {
-      try {
-        const response = await fetch(url, {
-          signal: AbortSignal.timeout(this.options.timeoutMs),
-          headers: {
-            "user-agent": "agent-app/0.1 (+https://example.local)",
-            accept: "text/html,application/json,text/plain;q=0.9,*/*;q=0.8",
-          },
-        });
+    try {
+      const response = await fetch(url, {
+        signal,
+        headers: {
+          "user-agent": "agent-app/0.1 (+https://example.local)",
+          accept: "text/html,application/json,text/plain;q=0.9,*/*;q=0.8",
+        },
+      });
 
-        if (!response.ok) {
-          throw new AppError("NETWORK_ERROR", `HttpFetchTool request failed with status ${response.status} for ${url}`);
-        }
-
-        const contentType = response.headers.get("content-type") ?? "unknown";
-        this.validateContentType(contentType, url);
-
-        const body = await response.text();
-        const plainText = this.toPlainText(body);
-        const truncatedText = plainText.slice(0, this.options.maxResponseBytes);
-        const compactText = truncatedText.slice(0, this.options.maxChars);
-
-        return [
-          `URL: ${url}`,
-          `Content-Type: ${contentType}`,
-          `TruncatedByBytes: ${plainText.length > truncatedText.length}`,
-          `TruncatedByChars: ${truncatedText.length > compactText.length}`,
-          "Content Preview:",
-          compactText,
-        ].join("\n\n");
-      } catch (error: unknown) {
-        lastError = error;
-
-        if (attempt > this.options.retries) {
-          break;
-        }
+      if (!response.ok) {
+        const retryableStatus = response.status === 408 || response.status === 429 || response.status >= 500;
+        throw new AppError(
+          retryableStatus ? "NETWORK_ERROR" : "BAD_REQUEST",
+          `HttpFetchTool request failed with status ${response.status} for ${url}`,
+          { url, status: response.status },
+        );
       }
-    }
 
-    if (lastError instanceof DOMException && lastError.name === "TimeoutError") {
-      throw new AppError("TIMEOUT_ERROR", `HttpFetchTool timed out for ${url}`);
-    }
+      const contentType = response.headers.get("content-type") ?? "unknown";
+      this.validateContentType(contentType, url);
 
-    if (lastError instanceof AppError) {
-      throw new AppError(lastError.code, lastError.message, { url });
-    }
+      const body = await response.text();
+      const plainText = this.toPlainText(body);
+      const truncatedText = plainText.slice(0, this.options.maxResponseBytes);
+      const compactText = truncatedText.slice(0, this.options.maxChars);
 
-    throw new AppError("TOOL_ERROR", `HttpFetchTool failed for ${url}`, { cause: String(lastError) });
+      return [
+        `URL: ${url}`,
+        `Content-Type: ${contentType}`,
+        `TruncatedByBytes: ${plainText.length > truncatedText.length}`,
+        `TruncatedByChars: ${truncatedText.length > compactText.length}`,
+        "Content Preview:",
+        compactText,
+      ].join("\n\n");
+    } catch (error: unknown) {
+      if (input.signal?.aborted) {
+        throw input.signal.reason instanceof AppError
+          ? input.signal.reason
+          : new AppError("CANCELLED", "HttpFetchTool request was cancelled.");
+      }
+
+      if (timeoutSignal.aborted) {
+        throw new AppError("TIMEOUT_ERROR", `HttpFetchTool timed out for ${url}`);
+      }
+
+      if (error instanceof AppError) {
+        throw error;
+      }
+
+      throw new AppError("NETWORK_ERROR", `HttpFetchTool failed for ${url}`, { cause: String(error) });
+    }
   }
 
   private extractUrl(input: string): string {

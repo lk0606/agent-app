@@ -24,6 +24,7 @@ import type { Tool, ToolInput } from "./tool.js";
 
 export class WriteFileTool implements Tool {
   readonly name = "write_file";
+  readonly idempotent = false;
   readonly description =
     "Writes a text file inside the configured sandbox directory. Input must be either two lines (relative path on the first line, file content on the following lines) or JSON {\"path\":\"notes/demo.txt\",\"content\":\"...\"}. This tool requires human confirmation before execution.";
   /** E.10：真正写盘前必须经 POST /tasks/:id/confirm 批准 */

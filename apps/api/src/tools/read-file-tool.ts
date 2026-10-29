@@ -10,6 +10,7 @@ import type { Tool, ToolInput } from "./tool.js";
 
 export class ReadFileTool implements Tool {
   readonly name = "read_file";
+  readonly idempotent = true;
   readonly description =
     "Reads a text file inside the configured sandbox directory. Pass a relative path such as sample-notes.txt or notes/demo.md.";
 
@@ -30,8 +31,8 @@ export class ReadFileTool implements Tool {
 
     try {
       fileStat = await stat(absolutePath);
-    } catch {
-      throw new AppError("BAD_REQUEST", `ReadFileTool could not access "${relativePath}".`);
+    } catch (error: unknown) {
+      throw classifyFileReadError(error, relativePath);
     }
 
     if (!fileStat.isFile()) {
@@ -42,7 +43,12 @@ export class ReadFileTool implements Tool {
       throw new AppError("BAD_REQUEST", `ReadFileTool blocked file larger than ${this.options.maxBytes} bytes: ${relativePath}`);
     }
 
-    const content = await readFile(absolutePath, "utf8");
+    let content: string;
+    try {
+      content = await readFile(absolutePath, "utf8");
+    } catch (error: unknown) {
+      throw classifyFileReadError(error, relativePath);
+    }
     const truncated = content.length > this.options.maxBytes;
     const body = content.slice(0, this.options.maxBytes);
 
@@ -98,4 +104,15 @@ export class ReadFileTool implements Tool {
 
     return absolutePath;
   }
+}
+
+function classifyFileReadError(error: unknown, relativePath: string): AppError {
+  const code = error instanceof Error && "code" in error
+    ? String((error as Error & { code?: unknown }).code)
+    : "";
+  const transientCodes = new Set(["EIO", "EMFILE", "ENFILE", "EBUSY", "ESTALE"]);
+
+  return transientCodes.has(code)
+    ? new AppError("NETWORK_ERROR", `ReadFileTool temporarily could not access "${relativePath}".`, { code })
+    : new AppError("BAD_REQUEST", `ReadFileTool could not access "${relativePath}".`, { code });
 }

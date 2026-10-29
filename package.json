@@ -24,6 +24,7 @@
     "start": "pnpm --filter @agent-app/api start",
     "start:server": "pnpm --filter @agent-app/api start:server",
     "task:replay": "pnpm --filter @agent-app/api task:replay",
+    "test": "pnpm --filter @agent-app/api test",
     "check": "pnpm --filter @agent-app/api check",
     "check:web": "pnpm --filter @agent-app/web lint && pnpm run build:web",
     "check:all": "pnpm run check && pnpm run check:web"

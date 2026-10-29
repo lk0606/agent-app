@@ -21,6 +21,8 @@ import type { Tool, ToolInput } from "./tool.js";
 
 export class SearchDocsTool implements Tool {
   readonly name = "search_docs";
+  // vector/hybrid 会调用外部 embedding，避免自动重试放大成本。
+  readonly idempotent = false;
   /** 给 Planner/function calling 看的说明；例子要贴近 fixture，降低胡选工具概率 */
   readonly description =
     "Searches indexed sandbox documents for relevant text snippets. Pass a natural-language query such as favorite city or Japan travel notes.";
@@ -143,8 +145,9 @@ export class SearchDocsTool implements Tool {
         ].join("\n");
       }
 
-      // embedTexts 批量 API；这里只传一个 query，取 [0]
-      const [embedding] = await this.options.embeddingClient.embedTexts([query]);
+      // embedTexts 批量 API；这里只传一个 query，取 [0]。
+      // 取消链：Planner 的任务 signal → ToolInput.signal → EmbeddingClient → OpenAI SDK/fetch。
+      const [embedding] = await this.options.embeddingClient.embedTexts([query], { signal: input.signal });
       queryEmbedding = embedding ?? null;
     }
 

@@ -43,6 +43,9 @@ export function createAgentRuntime(config: AppConfig) {
     logger,
     // PROMPT_INJECTION_GUARD_DEBUG=true 时日志再附「包装前 / 包装后」文本片段
     promptInjectionGuardDebug: config.promptInjectionGuardDebug,
+    maxRetries: config.llmMaxRetries,
+    retryBaseDelayMs: config.llmRetryBaseDelayMs,
+    retryMaxDelayMs: config.llmRetryMaxDelayMs,
   });
   const embeddingClient =
     config.searchDocsMode === "keyword"
@@ -59,7 +62,6 @@ export function createAgentRuntime(config: AppConfig) {
     new HttpFetchTool({
       timeoutMs: config.httpFetchTimeoutMs,
       maxChars: config.httpFetchMaxChars,
-      retries: config.httpFetchRetries,
       maxResponseBytes: config.httpFetchMaxResponseBytes,
       allowedContentTypes: config.httpFetchAllowedContentTypes,
       allowHosts: config.httpFetchAllowHosts,
@@ -109,6 +111,9 @@ export function createAgentRuntime(config: AppConfig) {
     // E.15：定稿前自检；关了则回到纯 ReAct
     reflectionEnabled: config.agentReflection,
     reflectionMaxRetries: config.agentReflectionMaxRetries,
+    toolMaxRetries: config.toolMaxRetries,
+    toolRetryBaseDelayMs: config.toolRetryBaseDelayMs,
+    toolRetryMaxDelayMs: config.toolRetryMaxDelayMs,
   });
 
   // E.12：supervisor = 路由 + 专家工具子集；single = 全量工具直跑 Planner（对比/救急）

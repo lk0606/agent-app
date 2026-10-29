@@ -12,6 +12,7 @@ const SLICE_MS = 100;
 
 export class WaitTool implements Tool {
   readonly name = "wait";
+  readonly idempotent = false;
   readonly description =
     "Waits for a number of seconds before continuing. Pass a positive integer like 10 or 15. Use when the user explicitly asks to wait, sleep, or delay.";
 
