@@ -62,7 +62,10 @@ keyword 那条不会进 2/3；只有 `SEARCH_DOCS_MODE=vector|hybrid` 才会。
 
 - 是否调用了预期工具（`expectedTools`）
 - 是否误调用了禁用工具（`forbiddenTools`）
-- 最终回答里是否包含关键字（`expectedKeywords`）
+- 最终回答里是否包含关键字（`expectedKeywords`：所列词**全部**命中）
+- 最终回答里是否命中任一等价关键字（`expectedKeywordsAnyOf`：**任一**命中即可）。
+  用途是「同一事实的多种写法」——例如 `["Taipei", "台北"]`，模型翻译成中文也不误报；
+  与 `expectedKeywords` 互补，两者可同时出现在一个 case 里
 - 最终回答里是否**不得**包含关键字（`forbiddenKeywords`）
 - **成功**工具调用次数是否超限（`maxToolCalls`；失败尝试如安全拦截不计入）
 - 任务是否按预期失败（`expectedTaskStatus` + `expectedErrorCode`）
