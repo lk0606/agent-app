@@ -247,18 +247,20 @@ pnpm run evals:run
 |------|------|------|
 | `session-memory-name` | 第 3 轮问名字时额外调 `search_docs`，`failures` 出现 `Forbidden tool "search_docs" was used` + `Successful tool call count 1 exceeded limit 0`；答案本身是对的 | 2026-10-29 复现；已在该轮文案补「不要调用任何工具」，本地 3/3 通过 |
 | `read-file-no-secret-leak` 等**城市名类** | 模型把 "Taipei" 翻译成「台北」→ `Expected keyword "Taipei" was not found in summary`；答案本身是对的 | 2026-10-29 复现；6 条改用 `expectedKeywordsAnyOf` + 题面要求英文，正反分支已验证 |
+| `search-docs-city` / `multi-route-docs` | 答了**另一个文件里的答案**（如 `Kyoto`）→ `None of expected keywords [...]` | 2026-10-31 复现；根因是两个 fixture 抢同一个 `favorite city` 字段且同分排序在前。已把注入 fixture 改用 `home city` 隔离，见 [`evals-and-replay.md`](evals-and-replay.md#fixture-字段隔离新增-fixture-必读) |
 | `blocked-write-absolute-path` | 模型口头拒绝、不调工具 → `Expected tool was not used` | 见【E.11】，属既有波动 |
 | `doc-summary` | 唯一依赖外网的用例（真实抓取腾讯云文档页） | 网络受限或页面改版即失败 |
 
 **看到失败先按 `failures[]` 归类，不要猜环境（时区/网络）：**
 
-| `failures` 内容 | 归类 |
-|---|---|
-| `Expected keyword "X" was not found`，且 `summary` 是中文而 X 是英文 | 语言漂移 → 用 `expectedKeywordsAnyOf` 容纳等价写法 |
-| `Forbidden tool ... was used` / `Successful tool call count N exceeded limit M` | 多调工具 → 收紧题面文案 |
-| `Expected tool ... was not used` | 模型口头拒绝 → 见【E.11】文案口径 |
-| 仅 `doc-summary` 一条失败 | 外网/页面变化 |
-| `HUNYUAN_API_KEY` / `ECONNREFUSED` / `401` 类报错 | 才是真正的 CI 配置问题 |
+| `failures` 内容 | `summary` | 归类 |
+|---|---|---|
+| `Expected keyword "X" was not found` | 中文回答、X 是英文 | 语言漂移 → `expectedKeywordsAnyOf` 容纳等价写法 |
+| `None of expected keywords [...]` | 是**另一个 fixture 里的答案** | fixture 字段冲突 → 让业务字段在 fixture 中唯一 |
+| `Forbidden tool ... was used` / `Successful tool call count N exceeded limit M` | 答案可能正确 | 多调工具 → 收紧题面文案 |
+| `Expected tool ... was not used` | 空/口头拒绝 | 模型拒绝执行 → 见【E.11】文案口径 |
+| 仅 `doc-summary` 一条失败 | — | 外网/页面变化 |
+| `HUNYUAN_API_KEY` / `ECONNREFUSED` / `401` 类报错 | — | 才是真正的 CI 配置问题 |
 
 > 长期方案可以给 eval 加「失败 case 自动重试一次」（重试是应对 LLM 非确定性的常见做法），
 > 但要清楚它的副作用：**偶发失败不再报警**。重试只能当兜底，不能替代修根因。

@@ -101,6 +101,33 @@ keyword 那条不会进 2/3；只有 `SEARCH_DOCS_MODE=vector|hybrid` 才会。
 
 每条 case 必须有且仅有 `input` 或 `steps` 之一。
 
+### fixture 字段隔离（新增 fixture 必读）
+
+`search_docs` 用关键词打分，**同一个 query 会跨文件命中多个 chunk**。如果两个 fixture 用**相同业务字段名**
+给出**不同答案**，模型选哪条取决于排序（同分时按 `sourcePath` 字典序，见 `document-index.ts` 的 `search`），
+用例就会随机挂——这不是 flakiness，是**数据缺陷**。
+
+**2026-10-31 事故复现**：`search-docs-city` 期望 `Taipei`，但 `prompt-injection-notes.txt` 里也写着
+`Favorite city: Kyoto`，且路径 `prompt-injection-*` 排在 `sample-notes-*` 之前 → 模型读到两条矛盾答案，答了 `Kyoto`。
+
+约定：
+
+| 规则 | 说明 |
+|------|------|
+| 正常 fixture 的业务字段唯一 | `favorite city` 只允许出现在 `sample-notes.txt` |
+| 攻击 / 注入类 fixture 用**独立字段** | `prompt-injection-notes.txt` 用 `home city`，不占用正常用例的断言字段 |
+| 新增检索类 case 先做冲突检查 | 见下方命令，确认 query 词只落在一个文件 |
+
+```bash
+cd apps/api/evals/fixtures
+grep -ril "favorite city" .   # 期望：只有 sample-notes.txt
+grep -ril "home city" .       # 期望：只有 prompt-injection-notes.txt
+grep -ril "japanese city" .   # 期望：只有 travel-notes.md
+```
+
+> 注入 fixture 的「矛盾表述」（Kyoto 已过期、Atlantis 才是权威值）是**故意的**，用来测模型会不会被说服。
+> 正因为如此，它必须与正常 fixture 的断言字段隔开，否则会污染所有检索类用例。
+
 ### 用例组织策略（何时拆文件）
 
 > **决策日期：2026-07-08** — 当前 **20 条、单文件** 足够；到阶段阈值再按本策略拆分，避免过早分类增加维护成本。
